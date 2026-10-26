@@ -31,8 +31,8 @@ GROUPS = {
     "kidney_right": ["FMA7204"],
     "bronchi": ["FMA31739", "FMA7396", "FMA68418"],
 }
-FACES = {"skin": 60000, "muscles": 160000, "liver": 16000, "heart": 14000,
-         "kidney_left": 5000, "kidney_right": 5000, "lung_left": 12000, "lung_right": 12000}
+FACES = {"skin": 28000, "muscles": 45000, "liver": 12000, "heart": 10000,
+         "kidney_left": 4000, "kidney_right": 4000, "lung_left": 8000, "lung_right": 8000}
 
 
 def element_map():

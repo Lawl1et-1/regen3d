@@ -9,13 +9,15 @@ planar half-space cuts and tunnels applied to the best samples of each batch.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-import torch
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+import torch  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "train"))
@@ -63,10 +65,10 @@ def log_snapshot(model, seed, tgt, out: Path, it: int, n_grow: int):
             ks.append(k)
         x = model.step(x)
     grown = x.clone()
-    # regeneration test: cut half off, then let it heal
+    # regeneration test: a deep swipe incision, then let it heal
     torch.manual_seed(it)
     regen = [render(grown[0])]
-    y = DAMAGES["plane"](grown[0].clone(), (0.4, 0.45))[None]
+    y = DAMAGES["wedge"](grown[0].clone(), (0.5, 0.6))[None]
     regen.append(render(y[0]))
     for k in range(1, n_grow + 1):
         y = model.step(y)
@@ -98,10 +100,18 @@ def main():
     ap.add_argument("--n-damage", type=int, default=2)
     ap.add_argument("--snap-every", type=int, default=250)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--vram", type=float, default=0.45,
+                    help="max share of GPU memory for training, so the browser/desktop keep enough")
+    ap.add_argument("--damage", nargs="+", default=["wedge:0.8", "sphere:0.2"],
+                    help="damage kinds with weights, e.g. wedge:0.8 sphere:0.2")
+    ap.add_argument("--checkpoints", type=float, nargs="+", default=[0.08, 0.25, 0.5, 0.75, 1.0],
+                    help="fractions of training at which to keep a checkpoint (for 'Watch the AI learn')")
     args = ap.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
+    if dev.type == "cuda":
+        torch.cuda.set_per_process_memory_fraction(args.vram)
     tgt, weight, meta = load_target(args.organ, dev)
     n = meta["n"]
     steps = args.steps or ([48, 80] if n <= 32 else [64, 104])
@@ -121,6 +131,9 @@ def main():
         start = ck["iter"] + 1
     scaler = torch.amp.GradScaler("cuda", enabled=args.amp)
 
+    kinds = tuple(d.split(":")[0] for d in args.damage)
+    weights = tuple(float(d.split(":")[1]) for d in args.damage)
+    keep = sorted({max(1, round(f * args.iters)) for f in args.checkpoints})
     seed = make_seed(n, meta["seed"], device=dev)
     pool = seed.repeat(args.pool, 1, 1, 1, 1)
     log = open(out / "log.csv", "a")
@@ -137,7 +150,7 @@ def main():
                 for j in range(1, 1 + args.n_damage):
                     k = args.batch - j
                     if x[k, 0].max() > 0.1:
-                        x[k], _ = random_damage(x[k])
+                        x[k], _ = random_damage(x[k], kinds, weights)
         k_steps = int(torch.randint(steps[0], steps[1] + 1, (1,)))
         with torch.autocast("cuda", dtype=torch.float16, enabled=args.amp):
             y = model(x, k_steps, use_checkpoint=args.ckpt)
@@ -166,6 +179,10 @@ def main():
             print(f"  snapshot: grow IoU {g:.3f}   regen IoU {r:.3f}", flush=True)
             torch.save(dict(model=model.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
                             iter=it, hidden=args.hidden, organ=args.organ), out / "model.pt")
+        if it + 1 in keep:
+            torch.save(dict(model=model.state_dict(), iter=it, hidden=args.hidden, organ=args.organ),
+                       out / f"ckpt_{it + 1:05d}.pt")
+            print(f"  checkpoint kept at iteration {it + 1}", flush=True)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,10 @@ export class OrganStage {
   private last = performance.now();
   private time = 0;
   ready = false;
+  private needPack = true;
+  private needRead = true;
+  private trailDrawn = false;
+  private lastVP = new Float32Array(16);
   onCut?: (info: CutInfo) => void;
   tissue: [number, number, number, number] = [0.36, 0.085, 0.065, 1];
 
@@ -39,6 +43,7 @@ export class OrganStage {
     st.renderer.particlesOn = false;
     st.renderer.aperture = 0;
     st.renderer.bloomStrength = 0.35;
+    st.renderer.renderScale = 0.65;
     st.scene = await Scene.load(gpu.device, organ);
     const w = st.scene.organ.meta.world;
     if (w) {
@@ -51,13 +56,14 @@ export class OrganStage {
   }
 
   resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(devicePixelRatio || 1, 1.25);
     this.canvas.width = Math.round(innerWidth * dpr);
     this.canvas.height = Math.round(innerHeight * dpr);
     const o = this.overlay.canvas;
     o.width = Math.round(innerWidth * (devicePixelRatio || 1));
     o.height = Math.round(innerHeight * (devicePixelRatio || 1));
     this.overlay.setTransform(devicePixelRatio || 1, 0, 0, devicePixelRatio || 1, 0, 0);
+    this.lastVP?.fill(NaN); // force a redraw at the new size
   }
 
   /** Healthy organ (the target tissue) with no lesion. */
@@ -65,6 +71,7 @@ export class OrganStage {
     this.scene.sim.setFromLabels(this.scene.organ.labels);
     this.scene.latestSummary = null;
     this.cutAge = -1;
+    this.needPack = true;
   }
 
   syncCamera(c: THREE.PerspectiveCamera, target: THREE.Vector3) {
@@ -189,6 +196,11 @@ export class OrganStage {
   }
 
   // ------------------------------------------------------------------ frame
+  /**
+   * Work only happens when needed: simulation passes when the tissue changes (a cut,
+   * or AI steps once trained), and a redraw when the camera moves or an effect fades.
+   * A still organ costs nothing.
+   */
   frame() {
     const now = performance.now();
     const dt = Math.min(0.1, (now - this.last) / 1000);
@@ -196,23 +208,42 @@ export class OrganStage {
     this.time += dt;
     if (this.cutAge >= 0) this.cutAge += dt;
     this.flash = Math.max(0, this.flash - dt * 2.5);
-    const enc = this.device.createCommandEncoder();
-    const trained = this.scene.organ.meta.hidden > 0;
-    this.scene.encode(enc, dt, trained ? undefined : 0);
-    const read = this.scene.maybeRead(enc, this.time);
-    const opts: FrameOpts = {
-      mode: 0, time: this.time, hiddenGain: 1, signalGain: 0, pulseFront: 2, pulseAmt: 0,
-      clip: { on: false, n: [0, 0, 1], d: 0 }, flash: this.flash * 0.25, exposure: 1.0,
-      growthRate: 0, debrisRate: 0, sparks: { a: [0, 0, 0], b: [0, 0, 0], on: false }, pieceVel: [0, 0, 0],
-    };
-    this.renderer.render(enc, this.cam, {
-      sim: this.scene.sim, toWorld: this.toWorld, tissue: this.tissue,
-      cuts: this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
-    }, null, opts, dt);
-    this.device.queue.submit([enc.finish()]);
-    read?.();
-    this.ready = !!this.scene.latestSummary;
-    this.drawTrail(now);
+
+    const sc = this.scene;
+    const trained = sc.organ.meta.hidden > 0;
+    const steps = trained ? sc.stepsThisFrame(dt) : 0;
+    const simChanged = this.needPack || sc.sim.pendingTools > 0 || steps > 0;
+    const vp = this.cam.viewProj;
+    const camChanged = vp.some((v, i) => v !== this.lastVP[i]);
+    const animating = this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5);
+    if (simChanged || camChanged || animating || this.needRead) {
+      const enc = this.device.createCommandEncoder();
+      let read = null;
+      if (simChanged) {
+        sc.nutrientIters = trained ? 6 : 0;
+        sc.encode(enc, dt, steps);
+        this.needPack = false;
+        this.needRead = true;
+      }
+      if (this.needRead) {
+        read = sc.maybeRead(enc, this.time, true);
+        if (read) this.needRead = false;
+      }
+      const opts: FrameOpts = {
+        mode: 0, time: this.time, hiddenGain: 1, signalGain: 0, pulseFront: 2, pulseAmt: 0,
+        clip: { on: false, n: [0, 0, 1], d: 0 }, flash: this.flash * 0.25, exposure: 1.0,
+        growthRate: 0, debrisRate: 0, sparks: { a: [0, 0, 0], b: [0, 0, 0], on: false }, pieceVel: [0, 0, 0],
+      };
+      this.renderer.render(enc, this.cam, {
+        sim: sc.sim, toWorld: this.toWorld, tissue: this.tissue,
+        cuts: this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
+      }, null, opts, dt);
+      this.device.queue.submit([enc.finish()]);
+      read?.();
+      this.lastVP.set(vp);
+    }
+    this.ready = !!sc.latestSummary;
+    if (this.trail.length || this.trailDrawn) this.drawTrail(now);
   }
 
   private drawTrail(now: number) {
@@ -221,6 +252,7 @@ export class OrganStage {
     const life = 220;
     this.trail = this.trail.filter((p) => now - p.t < life);
     const pts = this.trail;
+    this.trailDrawn = pts.length >= 2;
     if (pts.length < 2) return;
     g.save();
     g.globalCompositeOperation = 'lighter';

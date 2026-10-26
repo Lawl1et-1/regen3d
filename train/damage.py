@@ -89,7 +89,7 @@ def _orthonormal(v: torch.Tensor):
     return u, torch.linalg.cross(v, u)
 
 
-def wedge(x: torch.Tensor, depth_range=(0.15, 0.9), width_range=(1.5, 3.5)) -> torch.Tensor:
+def wedge(x: torch.Tensor, depth_range=(0.15, 0.95), width_range=(1.5, 4.5)) -> torch.Tensor:
     """Random swipe incision, as a user would make it: pick a view direction, a blade
     plane containing it, the entry point where that plane meets the visible surface,
     a stroke extent and a depth (fraction of the tissue thickness along the view)."""

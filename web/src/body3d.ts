@@ -29,7 +29,7 @@ const skinVert = /* glsl */ `
 
 // Skin: soft lit translucent tissue that turns into a glassy fresnel ghost in X-ray.
 const skinFrag = /* glsl */ `
-  uniform float uX; uniform float uFade; uniform float uTime;
+  uniform float uX; uniform float uFade;
   varying vec3 vN; varying vec3 vV; varying vec3 vW;
   void main() {
     vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
@@ -40,7 +40,7 @@ const skinFrag = /* glsl */ `
     vec3 skin = vec3(0.74, 0.58, 0.52) * dif + vec3(0.55, 0.65, 0.8) * fres * 0.4;
     float aSkin = mix(0.16, 0.85, fres);
     vec3 ghost = vec3(0.35, 0.75, 1.0) * (fres * 1.1 + 0.02);
-    float scan = 0.85 + 0.15 * smoothstep(0.4, 0.6, fract(vW.y * 18.0 - uTime * 0.4));
+    float scan = 0.85 + 0.15 * smoothstep(0.4, 0.6, fract(vW.y * 18.0));
     float aGhost = (fres * 0.32 + 0.015) * scan;
     vec3 c = mix(skin, ghost, uX);
     float a = mix(aSkin, aGhost, uX) * uFade;
@@ -49,7 +49,7 @@ const skinFrag = /* glsl */ `
 
 // Organs: glossy wet tissue; in X-ray they glow from within (fresnel + emissive).
 const organFrag = /* glsl */ `
-  uniform vec3 uColor; uniform vec3 uGlow; uniform float uX; uniform float uHover; uniform float uFade; uniform float uTime;
+  uniform vec3 uColor; uniform vec3 uGlow; uniform float uX; uniform float uHover; uniform float uFade;
   varying vec3 vN; varying vec3 vV; varying vec3 vW;
   void main() {
     vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
@@ -63,8 +63,7 @@ const organFrag = /* glsl */ `
     vec3 base = uColor * (0.22 + 0.95 * wrap) + uColor * vec3(1.0, 0.5, 0.45) * 0.25 * (1.0 - ndv);
     base += vec3(1.0, 0.96, 0.92) * spec * (0.2 + fres);
     base += vec3(0.5, 0.65, 0.9) * max(dot(n, L2), 0.0) * fres * 0.6;
-    float pulse = 0.85 + 0.15 * sin(uTime * 2.2);
-    vec3 glow = uGlow * (0.08 + 1.1 * fres) * pulse;
+    vec3 glow = uGlow * (0.08 + 1.1 * fres);
     vec3 c = base * (1.0 - 0.35 * uX) + glow * (uX * 1.05 + uHover * 0.6);
     gl_FragColor = vec4(c, uFade);
   }`;
@@ -104,12 +103,14 @@ export class BodyView3D {
   private tween: { from: [THREE.Vector3, THREE.Vector3]; to: [THREE.Vector3, THREE.Vector3]; start: number; dur: number } | null = null;
   private home = { pos: new THREE.Vector3(0, 0.3, 3.9), target: new THREE.Vector3(0, 0.12, 0) };
   onFrame?: (dt: number) => void;
+  /** The scene is only re-rendered when something changed (camera, fades, hover): idle costs nothing. */
+  dirty = true;
   /** When false the mesh scene is not drawn (the GPU organ volume covers it). */
   renderEnabled = true;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.scene.background = new THREE.Color(0x05070b);
@@ -120,9 +121,9 @@ export class BodyView3D {
     this.controls.target.copy(this.home.target);
     this.controls.minDistance = 0.35;
     this.controls.maxDistance = 6;
-    this.controls.autoRotateSpeed = 0.6;
+    this.controls.addEventListener('change', () => { this.dirty = true; });
 
-    const u = () => ({ uX: { value: 0 }, uFade: { value: 1 }, uTime: { value: 0 } });
+    const u = () => ({ uX: { value: 0 }, uFade: { value: 1 } });
     this.skinMat = new THREE.ShaderMaterial({
       uniforms: u(), vertexShader: skinVert, fragmentShader: skinFrag,
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
@@ -168,7 +169,7 @@ export class BodyView3D {
       const mat = new THREE.ShaderMaterial({
         uniforms: {
           uColor: { value: new THREE.Vector3(...o.color) }, uGlow: { value: new THREE.Vector3(...o.glow) },
-          uX: { value: 0 }, uHover: { value: 0 }, uFade: { value: 1 }, uTime: { value: 0 },
+          uX: { value: 0 }, uHover: { value: 0 }, uFade: { value: 1 },
         },
         vertexShader: skinVert, fragmentShader: organFrag, transparent: true, side: THREE.DoubleSide,
       });
@@ -185,7 +186,8 @@ export class BodyView3D {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
-    this.bloom.setSize(w, h);
+    this.bloom.setSize(Math.ceil(w / 2), Math.ceil(h / 2));
+    this.dirty = true;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -232,6 +234,8 @@ export class BodyView3D {
 
   get tweening() { return !!this.tween; }
 
+  set renderOn(on: boolean) { this.renderEnabled = on; this.dirty = true; }
+
   /** Left drag cuts (handled outside), right drag rotates; one finger cuts, two fingers rotate/zoom. */
   setCutControls(on: boolean) {
     this.controls.mouseButtons = on
@@ -240,15 +244,17 @@ export class BodyView3D {
     this.controls.touches = on
       ? { ONE: null as unknown as THREE.TOUCH, TWO: THREE.TOUCH.DOLLY_ROTATE }
       : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-    this.controls.autoRotateSpeed = on ? 0 : 0.6;
   }
 
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.5);
-    const time = this.clock.elapsedTime;
-    this.xray += (this.xrayTarget - this.xray) * (1 - Math.exp(-dt * 5));
-    const fTarget = this.focused ? 1 : 0;
-    this.focusAmt += (fTarget - this.focusAmt) * (1 - Math.exp(-dt * 3.2));
+    const settle = (cur: number, goal: number, rate: number) => {
+      if (Math.abs(goal - cur) < 0.002) return goal;
+      this.dirty = true;
+      return cur + (goal - cur) * (1 - Math.exp(-dt * rate));
+    };
+    this.xray = settle(this.xray, this.xrayTarget, 5);
+    this.focusAmt = settle(this.focusAmt, this.focused ? 1 : 0, 3.2);
 
     if (this.tween) {
       const tw = this.tween;
@@ -257,9 +263,9 @@ export class BodyView3D {
       this.camera.position.lerpVectors(tw.from[0], tw.to[0], e);
       this.controls.target.lerpVectors(tw.from[1], tw.to[1], e);
       if (t >= 1) this.tween = null;
+      this.dirty = true;
     }
     this.controls.enabled = !this.tween;
-    this.controls.autoRotate = !!this.focused && !this.tween;
     this.controls.update();
 
     const bodyFade = 1 - this.focusAmt;
@@ -267,7 +273,6 @@ export class BodyView3D {
     const xr = Math.max(this.xray, this.focusAmt);
     this.skinMat.uniforms.uX.value = xr;
     this.skinMat.uniforms.uFade.value = bodyFade;
-    this.skinMat.uniforms.uTime.value = time;
     this.muscleMat.uniforms.uFade.value = (1 - this.xray) * bodyFade;
     this.muscleMat.visible = this.muscleMat.uniforms.uFade.value > 0.01;
     this.muscleMat.depthWrite = this.muscleMat.uniforms.uFade.value > 0.95;
@@ -275,10 +280,9 @@ export class BodyView3D {
     for (const o of this.organs) {
       const isFocus = this.focused === o.id;
       const u = o.mat.uniforms;
-      u.uTime.value = time;
       u.uX.value = this.xray * (1 - this.focusAmt);
       const hv = this.hovered === o.id ? 1 : 0;
-      u.uHover.value += (hv - u.uHover.value) * (1 - Math.exp(-dt * 10));
+      u.uHover.value = settle(u.uHover.value, hv, 10);
       u.uFade.value = isFocus ? 1 : bodyFade;
       o.mat.visible = u.uFade.value > 0.01;
       o.mat.depthWrite = u.uFade.value > 0.95;
@@ -288,6 +292,9 @@ export class BodyView3D {
     floor.visible = bodyFade > 0.02;
     this.bloom.strength = 0.25 + 0.3 * this.xray * bodyFade;
     this.onFrame?.(dt);
-    if (this.renderEnabled) this.composer.render(dt);
+    if (this.renderEnabled && this.dirty) {
+      this.composer.render(dt);
+      this.dirty = false;
+    }
   }
 }

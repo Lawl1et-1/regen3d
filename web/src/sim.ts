@@ -269,6 +269,8 @@ export class Simulation {
     this.toxinActive = o.toxinActive;
   }
 
+  get pendingTools() { return this.toolQueue.length; }
+
   queueTool(op: ToolOp) { this.toolQueue.push(op); if (op.kind === TOOL_TOXIN) this.toxinActive = 400; }
 
   private writeField(kind: number, p0: number[], p1: number[], p2: number[], p3 = [0, 0, 0, 0], p4 = [0, 0, 0, 0]) {

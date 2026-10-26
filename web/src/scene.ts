@@ -80,9 +80,9 @@ export class Scene {
    * Every few frames, encode a copy of the summary; call the returned function after
    * submit to read it back and update metrics + the perfusion texture.
    */
-  maybeRead(enc: GPUCommandEncoder, time: number) {
+  maybeRead(enc: GPUCommandEncoder, time: number, force = false) {
     this.readFrame++;
-    if (this.reading || this.readFrame % 4 !== 0) return null;
+    if (this.reading || (!force && this.readFrame % 4 !== 0)) return null;
     const read = this.sim.readSummary(enc);
     if (!read) return null;
     this.reading = true;

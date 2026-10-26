@@ -94,8 +94,8 @@ function showStage(on: boolean) {
   document.body.classList.toggle('cutting', on);
   view.setCutControls(on);
   // keep drawing the meshes until the volume has faded in, so the swap is seamless
-  if (on) setTimeout(() => { if (stageOn) view.renderEnabled = false; }, 500);
-  else view.renderEnabled = true;
+  if (on) setTimeout(() => { if (stageOn) view.renderOn = false; }, 500);
+  else view.renderOn = true;
 }
 
 // ---------------------------------------------------------------- input
