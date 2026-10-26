@@ -17,9 +17,10 @@ sys.path.insert(0, str(ROOT / "eval"))
 from liver_results import load_model, swipe_lesion  # noqa: E402
 from nca import CHANNELS  # noqa: E402
 
+organ = sys.argv[1] if len(sys.argv) > 1 else "liver"
 dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-target = np.load(ROOT / "targets" / "data" / "liver.npy")
-model, _ = load_model(ROOT / "train" / "runs" / "liver" / "model.pt", dev)
+target = np.load(ROOT / "targets" / "data" / f"{organ}.npy")
+model, _ = load_model(ROOT / "train" / "runs" / organ / "model.pt", dev)
 n = target.shape[0]
 x = torch.zeros(1, CHANNELS, n, n, n, device=dev)
 x[0, 0] = torch.from_numpy(target > 0).float()
@@ -46,4 +47,4 @@ for s in scores:
 # focused on the wound (near/far) and strong (near change)
 top = [s[2] for s in sorted(scores, key=lambda s: -s[0] * s[1])[:3]]
 print("brain channels:", top)
-(ROOT / "targets" / "data" / "liver_brain.json").write_text(json.dumps({"brain_channels": top}))
+(ROOT / "targets" / "data" / f"{organ}_brain.json").write_text(json.dumps({"brain_channels": top}))

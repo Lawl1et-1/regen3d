@@ -3,21 +3,21 @@
   "n": 48,
   "channels": 16,
   "seed": [
-    21,
-    25,
-    20
+    24,
+    22,
+    25
   ],
   "hilum": [
-    24,
-    36,
+    28,
+    41,
     24
   ],
   "counts": {
-    "empty": 103331,
-    "capsule": 1943,
-    "parenchyma": 3428,
-    "vessel": 1285,
-    "drain": 605
+    "empty": 91250,
+    "capsule": 8464,
+    "parenchyma": 7465,
+    "vessel": 2716,
+    "drain": 697
   },
   "labels": [
     "empty",
@@ -25,5 +25,15 @@
     "parenchyma",
     "vessel",
     "drain"
-  ]
+  ],
+  "world": {
+    "center": [
+      0.02225901000201702,
+      0.4429900646209717,
+      0.023114077746868134
+    ],
+    "half": 0.06377506088465452
+  },
+  "mesh": "heart",
+  "source": "BodyParts3D heart walls (CC BY 4.0) + procedural coronary vessels"
 }

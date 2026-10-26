@@ -3,7 +3,7 @@
 // trail follows the gesture and, where it crossed the organ, a wedge incision is cut.
 import type * as THREE from 'three';
 import { initGPU } from './gpu';
-import { invert, mat4, v3, type M4, type V3 } from './math';
+import { invert, mat4, transformDir, v3, type M4, type V3 } from './math';
 import { Renderer, type CamLike, type FrameOpts } from './renderer';
 import { Scene } from './scene';
 import { Diagnosis, liveStepsPerSec, type DiagnosisResult } from './diagnosis';
@@ -18,6 +18,14 @@ export interface CutInfo { depthMm: number; lengthMm: number }
 export interface LearnRow { iteration: number; metrics: Metrics | null; step: number; done: boolean }
 export interface LearnProgress { rows: LearnRow[]; current: number; finished: boolean }
 const LEARN_STEPS = 100;
+
+/** Parenchyma colour of each organ in the realistic view. */
+const TISSUE: Record<string, [number, number, number, number]> = {
+  liver: [0.36, 0.085, 0.065, 1],
+  heart: [0.44, 0.06, 0.07, 1],
+  kidney: [0.40, 0.10, 0.085, 1],
+  lung: [0.62, 0.34, 0.36, 1],
+};
 
 export class OrganStage {
   scene!: Scene;
@@ -68,10 +76,14 @@ export class OrganStage {
   onCompare?: (c: { ai: Metrics; base: Metrics; frame: number; frames: number }) => void;
   onLearn?: (l: LearnProgress) => void;
   tissue: [number, number, number, number] = [0.36, 0.085, 0.065, 1];
+  /** one simulation + diagnosis per organ, created on first use */
+  private organs = new Map<string, { scene: Scene; diagnosis: Diagnosis | null }>();
+  onDiagProgress?: (p: Parameters<NonNullable<Diagnosis['onProgress']>>[0]) => void;
+  onDiagResult?: (r: DiagnosisResult) => void;
 
   private constructor(readonly canvas: HTMLCanvasElement, readonly overlay: CanvasRenderingContext2D) {}
 
-  static async create(canvas: HTMLCanvasElement, overlay: HTMLCanvasElement, organ: string) {
+  static async create(canvas: HTMLCanvasElement, overlay: HTMLCanvasElement) {
     const st = new OrganStage(canvas, overlay.getContext('2d')!);
     const gpu = await initGPU(canvas);
     if (!gpu) return null;
@@ -81,19 +93,41 @@ export class OrganStage {
     st.renderer.aperture = 0;
     st.renderer.bloomStrength = 0.35;
     st.renderer.renderScale = 0.65;
-    st.scene = await Scene.load(gpu.device, organ);
-    const w = st.scene.organ.meta.world;
-    if (w) {
-      st.toWorld.set([w.half, 0, 0, 0, 0, w.half, 0, 0, 0, 0, w.half, 0, w.center[0], w.center[1], w.center[2], 1]);
-    }
-    if (st.scene.organ.meta.hidden > 0) {
-      const fc = new Simulation(st.scene.kernels, 'forecast');
-      st.diagnosis = new Diagnosis(gpu.device, st.scene.sim, fc, st.scene.metrics, st.scene.organ.meta.hilum);
-    }
-    st.reset();
     st.resize();
     addEventListener('resize', () => st.resize());
     return st;
+  }
+
+  /**
+   * Show `organ` as the living volume, centred on `center` (the clicked mesh). `mirror`
+   * flips it left-right: one kidney / lung model serves both sides of the body.
+   */
+  async useOrgan(organ: string, center: V3, mirror: boolean) {
+    let o = this.organs.get(organ);
+    if (!o) {
+      const scene = await Scene.load(this.device, organ);
+      let diagnosis: Diagnosis | null = null;
+      if (scene.organ.meta.hidden > 0) {
+        diagnosis = new Diagnosis(this.device, scene.sim, new Simulation(scene.kernels, 'forecast'), scene.metrics, scene.organ.meta.hilum);
+        diagnosis.onProgress = (p) => this.onDiagProgress?.(p);
+        diagnosis.onResult = (r) => this.onDiagResult?.(r);
+      }
+      o = { scene, diagnosis };
+      this.organs.set(organ, o);
+    }
+    if (this.scene !== o.scene) {
+      this.diagnosis?.cancel();
+      // the comparison volumes belong to the previous organ
+      this.baseSim?.destroy(); this.baseSim = null;
+      this.learnSim?.destroy(); this.learnSim = null; this.learnKernels = null;
+      this.ckptCache.clear();
+    }
+    this.scene = o.scene;
+    this.diagnosis = o.diagnosis;
+    this.tissue = TISSUE[organ] ?? TISSUE.liver;
+    const h = o.scene.organ.meta.world?.half ?? 0.13;
+    this.toWorld.set([mirror ? -h : h, 0, 0, 0, 0, h, 0, 0, 0, 0, h, 0, center[0], center[1], center[2], 1]);
+    this.reset();
   }
 
   resize() {
@@ -323,8 +357,10 @@ export class OrganStage {
     const n = this.scene.n;
     const first = hits[0], lastH = hits[hits.length - 1];
     const eye = this.cam.eye;
-    // blade plane contains the two camera rays at the stroke's entry and exit
-    const da = v3.norm(v3.sub(first.world, eye)), db = v3.norm(v3.sub(lastH.world, eye));
+    // blade plane contains the two camera rays at the stroke's entry and exit (in voxel space)
+    const inv = invert(this.toWorld);
+    const vox = (d: V3) => v3.norm(transformDir(inv, d));
+    const da = vox(v3.norm(v3.sub(first.world, eye))), db = vox(v3.norm(v3.sub(lastH.world, eye)));
     let nrm = v3.cross(da, db);
     if (v3.len(nrm) < 1e-6) return;
     nrm = v3.norm(nrm);

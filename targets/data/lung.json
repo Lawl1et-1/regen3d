@@ -3,21 +3,21 @@
   "n": 48,
   "channels": 16,
   "seed": [
-    21,
-    20,
-    23
+    22,
+    24,
+    19
   ],
   "hilum": [
-    32,
+    34,
     25,
-    24
+    18
   ],
   "counts": {
-    "empty": 96130,
-    "capsule": 2874,
-    "parenchyma": 8846,
-    "vessel": 2032,
-    "drain": 710
+    "empty": 98186,
+    "capsule": 2713,
+    "parenchyma": 7435,
+    "vessel": 1777,
+    "drain": 481
   },
   "labels": [
     "empty",
@@ -25,5 +25,15 @@
     "parenchyma",
     "vessel",
     "drain"
-  ]
+  ],
+  "world": {
+    "center": [
+      -0.05928482487797737,
+      0.4597730040550232,
+      -0.0018790103495121002
+    ],
+    "half": 0.12028633952140809
+  },
+  "mesh": "lung_right",
+  "source": "BodyParts3D bronchial tree envelope (CC BY 4.0) + procedural vessels and airways"
 }

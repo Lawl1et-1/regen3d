@@ -1,6 +1,6 @@
 """Training results as 3D images (no charts).
 
-    python eval/liver_results.py            # final model + every saved checkpoint
+    python eval/liver_results.py [organ]    # final model + every saved checkpoint (default: liver)
 
 Writes figures/liver/:
   01_repair.png       a swipe incision and its repair, with measured shape / function / vessels
@@ -28,7 +28,8 @@ from metrics import all_metrics, classify  # noqa: E402
 from nca import CHANNELS, NCA3D  # noqa: E402
 from render3d import _dev, render  # noqa: E402
 
-OUT = ROOT / "figures" / "liver"
+ORGAN = "liver"
+OUT = ROOT / "figures" / ORGAN
 SETTLE = 60   # steps the AI runs on the healthy organ before the cut
 REPAIR = 300
 TEXT = (231, 236, 243)
@@ -133,10 +134,14 @@ def fmt(m):
 
 
 def main():
+    global ORGAN, OUT
+    if len(sys.argv) > 1:
+        ORGAN = sys.argv[1]
+        OUT = ROOT / "figures" / ORGAN
     dev = _dev()
-    run_dir = ROOT / "train" / "runs" / "liver"
-    target = np.load(ROOT / "targets" / "data" / "liver.npy")
-    meta = json.loads((ROOT / "targets" / "data" / "liver.json").read_text())
+    run_dir = ROOT / "train" / "runs" / ORGAN
+    target = np.load(ROOT / "targets" / "data" / f"{ORGAN}.npy")
+    meta = json.loads((ROOT / "targets" / "data" / f"{ORGAN}.json").read_text())
     hil = meta["hilum"]
     n = meta["n"]
     mask = swipe_lesion(target)

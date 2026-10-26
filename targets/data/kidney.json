@@ -3,21 +3,21 @@
   "n": 48,
   "channels": 16,
   "seed": [
-    22,
+    25,
     23,
-    25
+    23
   ],
   "hilum": [
-    31,
+    33,
     24,
-    24
+    26
   ],
   "counts": {
-    "empty": 103341,
-    "capsule": 1534,
-    "parenchyma": 4288,
-    "vessel": 947,
-    "drain": 482
+    "empty": 102582,
+    "capsule": 1998,
+    "parenchyma": 4503,
+    "vessel": 1171,
+    "drain": 338
   },
   "labels": [
     "empty",
@@ -25,5 +25,15 @@
     "parenchyma",
     "vessel",
     "drain"
-  ]
+  ],
+  "world": {
+    "center": [
+      0.06225719302892685,
+      0.25595632940530777,
+      -0.020843634178163484
+    ],
+    "half": 0.058270294219255454
+  },
+  "mesh": "kidney_left",
+  "source": "BodyParts3D left kidney (CC BY 4.0) + procedural renal vessels and pelvis"
 }

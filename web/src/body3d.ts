@@ -81,7 +81,8 @@ const muscleFrag = /* glsl */ `
     gl_FragColor = vec4(c, uFade);
   }`;
 
-interface OrganEntry { id: OrganId; meshes: THREE.Mesh[]; mat: THREE.ShaderMaterial; center: THREE.Vector3; radius: number }
+/** One organ mesh (a kidney or a lung is one of a pair): its own material so it can be isolated. */
+interface OrganEntry { id: OrganId; node: string; mesh: THREE.Mesh; mat: THREE.ShaderMaterial; center: THREE.Vector3; radius: number; box: THREE.Box3 }
 
 export class BodyView3D {
   readonly renderer: THREE.WebGLRenderer;
@@ -166,18 +167,24 @@ export class BodyView3D {
     const muscles = byName('muscles');
     if (muscles) { muscles.material = this.muscleMat; muscles.renderOrder = 5; }
     for (const [id, o] of Object.entries(ORGANS) as [OrganId, (typeof ORGANS)[OrganId]][]) {
-      const mat = new THREE.ShaderMaterial({
-        uniforms: {
-          uColor: { value: new THREE.Vector3(...o.color) }, uGlow: { value: new THREE.Vector3(...o.glow) },
-          uX: { value: 0 }, uHover: { value: 0 }, uFade: { value: 1 },
-        },
-        vertexShader: skinVert, fragmentShader: organFrag, transparent: true, side: THREE.DoubleSide,
-      });
-      const meshes = o.nodes.map(byName).filter((m): m is THREE.Mesh => !!m);
-      const box = new THREE.Box3();
-      for (const m of meshes) { m.material = mat; m.renderOrder = 1; m.userData.organ = id; box.expandByObject(m); }
-      const sphere = box.getBoundingSphere(new THREE.Sphere());
-      this.organs.push({ id, meshes, mat, center: sphere.center, radius: sphere.radius });
+      for (const node of o.nodes) {
+        const mesh = byName(node);
+        if (!mesh) continue;
+        const mat = new THREE.ShaderMaterial({
+          uniforms: {
+            uColor: { value: new THREE.Vector3(...o.color) }, uGlow: { value: new THREE.Vector3(...o.glow) },
+            uX: { value: 0 }, uHover: { value: 0 }, uFade: { value: 1 },
+          },
+          vertexShader: skinVert, fragmentShader: organFrag, transparent: true, side: THREE.DoubleSide,
+        });
+        mesh.material = mat;
+        mesh.renderOrder = 1;
+        mesh.userData.organ = id;
+        mesh.userData.node = node;
+        const box = new THREE.Box3().expandByObject(mesh);
+        const sphere = box.getBoundingSphere(new THREE.Sphere());
+        this.organs.push({ id, node, mesh, mat, center: sphere.center, radius: sphere.radius, box });
+      }
     }
     this.scene.add(root);
   }
@@ -192,26 +199,40 @@ export class BodyView3D {
     this.camera.updateProjectionMatrix();
   }
 
-  organ(id: OrganId) { return this.organs.find((o) => o.id === id)!; }
+  /** The mesh entries of an organ (two for kidneys and lungs). */
+  entries(id: OrganId) { return this.organs.filter((o) => o.id === id); }
+  /** Mesh node under the cursor at the last pick (e.g. 'kidney_right'). */
+  pickedNode: string | null = null;
+  focusedNode: string | null = null;
+  /** Centre of a mesh's bounding box (where a GPU volume of it is placed). */
+  nodeCenter(node: string): [number, number, number] {
+    const c = this.organs.find((o) => o.node === node)!.box.getCenter(new THREE.Vector3());
+    return [c.x, c.y, c.z];
+  }
 
   /** Organ under a screen point (organs are pickable even behind the skin). */
   pick(x: number, y: number): OrganId | null {
     if (this.focused) return null;
     const ndc = new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    const hits = this.raycaster.intersectObjects(this.organs.flatMap((o) => o.meshes), false);
+    const hits = this.raycaster.intersectObjects(this.organs.map((o) => o.mesh), false);
+    this.pickedNode = (hits[0]?.object.userData.node as string) ?? null;
     return (hits[0]?.object.userData.organ as OrganId) ?? null;
   }
 
   /** Screen position of an organ's centre (for labels). */
   screenOf(id: OrganId): [number, number] {
-    const p = this.organ(id).center.clone().project(this.camera);
+    const es = this.entries(id);
+    const p = es.reduce((a, e) => a.add(e.center), new THREE.Vector3()).multiplyScalar(1 / es.length).project(this.camera);
     return [(p.x * 0.5 + 0.5) * innerWidth, (0.5 - p.y * 0.5) * innerHeight];
   }
 
-  focus(id: OrganId) {
-    const o = this.organ(id);
+  /** Zoom onto one organ mesh (`node`, e.g. the kidney that was clicked) and fade everything else. */
+  focus(id: OrganId, node?: string) {
+    const es = this.entries(id);
+    const o = es.find((e) => e.node === node) ?? es[0];
     this.focused = id;
+    this.focusedNode = o.node;
     const dir = this.camera.position.clone().sub(this.controls.target).setY(0).normalize();
     if (dir.lengthSq() < 0.5) dir.set(0, 0, 1);
     dir.lerp(new THREE.Vector3(0, 0, 1), 0.6).normalize().add(new THREE.Vector3(0, 0.12, 0)).normalize();
@@ -286,7 +307,7 @@ export class BodyView3D {
     this.muscleMat.depthWrite = this.muscleMat.uniforms.uFade.value > 0.95;
     this.skinMat.visible = this.skinMat.uniforms.uFade.value > 0.01;
     for (const o of this.organs) {
-      const isFocus = this.focused === o.id;
+      const isFocus = this.focused === o.id && o.node === this.focusedNode;
       const u = o.mat.uniforms;
       u.uX.value = this.xray * (1 - this.focusAmt);
       const hv = this.hovered === o.id ? 1 : 0;

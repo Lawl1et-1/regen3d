@@ -14,11 +14,23 @@ const ui = document.getElementById('ui')!;
 const view = new BodyView3D(canvas);
 if (import.meta.env.DEV) (window as unknown as { __view: BodyView3D }).__view = view;
 
-/** Organs with a GPU volume that can be cut (the others come after approval). */
-const CUTTABLE: OrganId[] = ['liver'];
+/**
+ * Each organ's trained model and the mesh it was trained on. Kidneys and lungs come in
+ * pairs: the other side shows the same model mirrored.
+ */
+const MODELS: Record<OrganId, { model: string; mesh: string }> = {
+  liver: { model: 'liver', mesh: 'liver' },
+  heart: { model: 'heart', mesh: 'heart' },
+  kidney: { model: 'kidney', mesh: 'kidney_left' },
+  lung: { model: 'lung', mesh: 'lung_right' },
+};
+/** Organs whose AI is trained and exported (organs/index.json). */
+let CUTTABLE: OrganId[] = [];
 let stage: OrganStage | null = null;
 let stageLoading: Promise<OrganStage | null> | null = null;
 let stageOn = false;
+/** the organ volume currently loaded in the stage (it switches when another organ is selected) */
+let stageOrgan: string | null = null;
 
 // ---------------------------------------------------------------- UI
 const top = h('div', { class: 'topbar glass' }, '<div class="brand">REGEN<b>3D</b></div><div class="organ-tag">AI organ repair</div>');
@@ -146,7 +158,11 @@ function setXray(on: boolean) {
 }
 
 function select(id: OrganId) {
-  view.focus(id);
+  const node = view.pickedNode ?? MODELS[id].mesh;
+  view.focus(id, node);
+  stageOrgan = null;
+  stage?.setBrain(false);
+  brainNote.classList.remove('show');
   label.classList.remove('show');
   top.classList.add('dim');
   const cuttable = CUTTABLE.includes(id);
@@ -174,9 +190,9 @@ function select(id: OrganId) {
     learn.onclick = () => openView('learn');
     actions.append(noAi, learn);
     actions.appendChild(reset);
-    prepareStage(id);
+    prepareStage(id, node);
   } else {
-    actions.appendChild(h('div', { class: 'fp-note' }, 'Lesions are available on the liver first; this organ gets its own AI after approval.'));
+    actions.appendChild(h('div', { class: 'fp-note' }, 'This organ\'s AI is still training.'));
   }
   const back = h('button', { class: 'pill' }, '← Back to body');
   back.onclick = () => unselect();
@@ -201,26 +217,30 @@ function unselect() {
   hint.textContent = 'Drag to rotate · scroll to zoom · click an organ';
 }
 
-function prepareStage(id: OrganId) {
-  if (!stageLoading) {
-    stageLoading = OrganStage.create(gpuCanvas, trailCanvas, id).then((s) => {
-      stage = s;
-      if (s) {
-        s.onCut = (info) => { setCutInfo(info); showPhases(null); enableProofs(); };
-        s.onPlan = () => analysis.plan();
-        s.onRepair = (st) => showPhases(st);
-        s.onRepairDone = (o, f) => { analysis.actual(o, f); enableProofs(); };
-        s.onCompare = (c) => showCompare(c);
-        s.onLearn = (l) => showLearn(l);
-        if (s.diagnosis) {
-          s.diagnosis.onProgress = (p) => analysis.progress(p);
-          s.diagnosis.onResult = (r) => { analysis.result(r); s.showDiagnosis(r); enableProofs(); };
-        }
-      }
-      if (import.meta.env.DEV) (window as unknown as { __stage: OrganStage | null }).__stage = s;
-      return s;
-    }).catch((e) => { console.error(e); return null; });
-  }
+function prepareStage(id: OrganId, node: string) {
+  const m = MODELS[id];
+  const load = (s: OrganStage | null) => {
+    if (!s) return;
+    void s.useOrgan(m.model, view.nodeCenter(node), node !== m.mesh).then(() => {
+      if (view.focused === id) stageOrgan = m.model;
+    });
+  };
+  stageLoading ??= OrganStage.create(gpuCanvas, trailCanvas).then((s) => {
+    stage = s;
+    if (s) {
+      s.onCut = (info) => { setCutInfo(info); showPhases(null); enableProofs(); };
+      s.onPlan = () => analysis.plan();
+      s.onRepair = (st) => showPhases(st);
+      s.onRepairDone = (o, f) => { analysis.actual(o, f); enableProofs(); };
+      s.onCompare = (c) => showCompare(c);
+      s.onLearn = (l) => showLearn(l);
+      s.onDiagProgress = (p) => analysis.progress(p);
+      s.onDiagResult = (r) => { analysis.result(r); s.showDiagnosis(r); enableProofs(); };
+    }
+    if (import.meta.env.DEV) (window as unknown as { __stage: OrganStage | null }).__stage = s;
+    return s;
+  }).catch((e) => { console.error(e); return null; });
+  void stageLoading.then(load);
 }
 
 function showStage(on: boolean) {
@@ -279,7 +299,7 @@ view.onFrame = () => {
 
   // once the zoom onto a cuttable organ ends, swap the mesh for the living GPU volume
   const f = view.focused;
-  if (!stageOn && stage && f && CUTTABLE.includes(f) && !view.tweening) showStage(true);
+  if (!stageOn && stage && f && stageOrgan === MODELS[f].model && !view.tweening) showStage(true);
   if (stage && viewOpen === 'compare') {
     const [lx, ly] = stage.screenOf('main'), [rx, ry] = stage.screenOf('piece');
     tagL.style.transform = `translate(${lx}px, ${ly}px)`;
@@ -291,11 +311,16 @@ view.onFrame = () => {
   }
 };
 
-view.load(`${import.meta.env.BASE_URL}models/body.glb`)
+const organList = fetch(`${import.meta.env.BASE_URL}organs/index.json`).then((r) => r.json() as Promise<{ name: string }[]>)
+  .then((list) => { CUTTABLE = (Object.keys(MODELS) as OrganId[]).filter((id) => list.some((o) => o.name === MODELS[id].model)); })
+  .catch(() => { CUTTABLE = []; });
+
+Promise.all([view.load(`${import.meta.env.BASE_URL}models/body.glb`), organList])
   .then(() => {
     const loop = () => { view.frame(); requestAnimationFrame(loop); };
     loop();
-    if (import.meta.env.DEV && location.hash === '#liver') select('liver');
+    const dev = location.hash.slice(1) as OrganId;
+    if (import.meta.env.DEV && dev in MODELS) select(dev);
   })
   .catch((err) => {
     console.error(err);
