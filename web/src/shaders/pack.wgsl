@@ -33,9 +33,46 @@ fn pack(@builtin(global_invocation_id) gid: vec3u) {
   let h = hs[min(K.hiddenSel, 10u)];
   let a = clamp(s0.x, 0.0, 1.0);
   let types = clamp(vec4f(s0.y, s0.z, s0.w, s1.x), vec4f(0.0), vec4f(1.0));
-  textureStore(tex0, gid, vec4f(a, types.x, types.y, types.z));
-  textureStore(tex1, gid, vec4f(types.w, h, nut[i], act[i]));
-  textureStore(tex2, gid, vec4f(wound[i], toxin[i], growth[i], 0.0));
+  // render-only smoothing: a 3x3x3 binomial filter so the 48^3 grid shows no voxel steps
+  var sa = vec4f(0.0);
+  var sd = 0.0;
+  var swd = 0.0;
+  let w3 = array<f32, 3>(1.0, 2.0, 1.0);
+  for (var dz = 0; dz < 3; dz++) {
+    for (var dy = 0; dy < 3; dy++) {
+      for (var dx = 0; dx < 3; dx++) {
+        let q = vec3i(gid) + vec3i(dx - 1, dy - 1, dz - 1);
+        if (any(q < vec3i(0)) || any(q >= vec3i(i32(n)))) { continue; }
+        let j = u32(q.x) + u32(q.y) * n + u32(q.z) * n * n;
+        let w = w3[dx] * w3[dy] * w3[dz];
+        let v0 = state[j * 4u];
+        sa += clamp(v0, vec4f(0.0), vec4f(1.0)) * w;
+        sd += clamp(state[j * 4u + 1u].x, 0.0, 1.0) * w;
+        swd += wound[j] * w;
+      }
+    }
+  }
+  sa = sa / 64.0;
+  sd = sd / 64.0;
+  // density gets a wider 5x5x5 binomial filter: oblique cut walls stay smooth on a 48^3 grid
+  var a5 = 0.0;
+  let w5 = array<f32, 5>(1.0, 4.0, 6.0, 4.0, 1.0);
+  for (var dz = 0; dz < 5; dz++) {
+    for (var dy = 0; dy < 5; dy++) {
+      for (var dx = 0; dx < 5; dx++) {
+        let q = vec3i(gid) + vec3i(dx - 2, dy - 2, dz - 2);
+        if (any(q < vec3i(0)) || any(q >= vec3i(i32(n)))) { continue; }
+        let j = u32(q.x) + u32(q.y) * n + u32(q.z) * n * n;
+        a5 += clamp(state[j * 4u].x, 0.0, 1.0) * w5[dx] * w5[dy] * w5[dz];
+      }
+    }
+  }
+  sa.x = a5 / 4096.0;
+  // thin structures (1-voxel vessels) would fade under the filter: keep part of their own value
+  let va = max(sa.x, a * 0.6);
+  textureStore(tex0, gid, vec4f(va, sa.y, sa.z, sa.w));
+  textureStore(tex1, gid, vec4f(sd, h, nut[i], act[i]));
+  textureStore(tex2, gid, vec4f(max(wound[i], swd / 64.0 * 1.6), toxin[i], growth[i], 0.0));
 
   var cls = 0u;
   if (s0.x > 0.1) {

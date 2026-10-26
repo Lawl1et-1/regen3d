@@ -10,6 +10,7 @@ export const TOOL_SPHERE = 1;
 export const TOOL_STROKE = 2;
 export const TOOL_PLANE = 3;
 export const TOOL_TOXIN = 4;
+export const TOOL_WEDGE = 5;
 
 export interface OrganMeta {
   name: string;
@@ -23,6 +24,7 @@ export interface OrganMeta {
   w1: number[];
   b1: number[];
   w2: number[];
+  world?: { center: [number, number, number]; half: number };
 }
 
 export interface Organ {
@@ -107,6 +109,8 @@ export interface ToolOp {
   kind: number;
   p0: [number, number, number, number];
   p1?: [number, number, number, number];
+  p3?: [number, number, number, number];
+  p4?: [number, number, number, number];
   amount?: number;
 }
 
@@ -161,7 +165,7 @@ export class Simulation {
     this.summary = buf(v * 4);
     this.ctrl = buf(16);
     this.params = d.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.fieldU = d.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.fieldU = d.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.packU = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.staging = [0, 1].map(() =>
       d.createBuffer({ size: v * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }));
@@ -235,7 +239,22 @@ export class Simulation {
     this.toxinActive = 0;
   }
 
-  /** Fill with the target organ (types one-hot) — used only for the "show target" toggle. */
+  /** Fill the state with the target organ: alive, one-hot cell types, hidden channels at 0. */
+  setFromLabels(labels: Uint8Array) {
+    const s = new Float32Array(this.voxels * CH);
+    for (let i = 0; i < this.voxels; i++) {
+      const l = labels[i];
+      if (!l) continue;
+      s[i * CH] = 1;
+      s[i * CH + l] = 1;
+    }
+    const d = this.k.device;
+    d.queue.writeBuffer(this.state, 0, s);
+    const z = new Float32Array(this.voxels);
+    for (const b of [this.act, this.wound, this.growth, this.toxA, this.toxB, this.nutA, this.nutB]) d.queue.writeBuffer(b, 0, z);
+  }
+
+  /** The step counter seeds the stochastic update mask, so it makes runs reproducible. */
   setStepIndex(i: number) {
     this.steps = i;
     this.k.device.queue.writeBuffer(this.ctrl, 0, new Uint32Array([i, 0, 0, 0]));
@@ -252,12 +271,12 @@ export class Simulation {
 
   queueTool(op: ToolOp) { this.toolQueue.push(op); if (op.kind === TOOL_TOXIN) this.toxinActive = 400; }
 
-  private writeField(kind: number, p0: number[], p1: number[], p2: number[]) {
-    const b = new ArrayBuffer(64);
+  private writeField(kind: number, p0: number[], p1: number[], p2: number[], p3 = [0, 0, 0, 0], p4 = [0, 0, 0, 0]) {
+    const b = new ArrayBuffer(96);
     const u = new Uint32Array(b);
     const f = new Float32Array(b);
     u[0] = this.n; u[1] = kind; u[2] = this.hiddenSel; u[3] = 0;
-    f.set(p0, 4); f.set(p1, 8); f.set(p2, 12);
+    f.set(p0, 4); f.set(p1, 8); f.set(p2, 12); f.set(p3, 16); f.set(p4, 20);
     return b;
   }
 
@@ -269,7 +288,7 @@ export class Simulation {
     const d = this.k.device;
     for (const op of this.toolQueue) {
       const enc = d.createCommandEncoder();
-      d.queue.writeBuffer(this.fieldU, 0, this.writeField(op.kind, op.p0, op.p1 ?? [0, 0, 0, 0], [0.15, 0.12, op.amount ?? 3, 0.996]));
+      d.queue.writeBuffer(this.fieldU, 0, this.writeField(op.kind, op.p0, op.p1 ?? [0, 0, 0, 0], [0.15, 0.12, op.amount ?? 3, 0.996], op.p3, op.p4));
       const p = enc.beginComputePass();
       p.setPipeline(this.k.toolPipe);
       p.setBindGroup(0, this.fieldBG);

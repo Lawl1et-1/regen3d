@@ -18,12 +18,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def export(organ: str):
-    ck = torch.load(ROOT / "train" / "runs" / organ / "model.pt", map_location="cpu")
+    meta = json.loads((ROOT / "targets" / "data" / f"{organ}.json").read_text())
+    ckpt = ROOT / "train" / "runs" / organ / "model.pt"
+    if not ckpt.exists():  # target only (no trained model yet)
+        return export_target(organ, meta)
+    ck = torch.load(ckpt, map_location="cpu")
     sd = ck["model"]
     w1 = sd["w1.weight"].reshape(sd["w1.weight"].shape[0], -1).numpy()  # (hidden, 4C)
     b1 = sd["w1.bias"].numpy()
     w2 = sd["w2.weight"].reshape(sd["w2.weight"].shape[0], -1).numpy()  # (C, hidden)
-    meta = json.loads((ROOT / "targets" / "data" / f"{organ}.json").read_text())
     labels = np.load(ROOT / "targets" / "data" / f"{organ}.npy")  # (z, y, x)
     out = ROOT / "web" / "public" / "organs"
     out.mkdir(parents=True, exist_ok=True)
@@ -36,6 +39,16 @@ def export(organ: str):
     (out / f"{organ}.json").write_text(json.dumps(meta))
     labels.astype(np.uint8).tofile(out / f"{organ}.labels.bin")
     print("exported", organ, "hidden", w1.shape[0], "iters", meta["trained_iters"])
+
+
+def export_target(organ: str, meta: dict):
+    out = ROOT / "web" / "public" / "organs"
+    out.mkdir(parents=True, exist_ok=True)
+    labels = np.load(ROOT / "targets" / "data" / f"{organ}.npy")
+    meta.update(hidden=0, fire_rate=0.5, trained_iters=0, w1=[], b1=[], w2=[])
+    (out / f"{organ}.json").write_text(json.dumps(meta))
+    labels.astype(np.uint8).tofile(out / f"{organ}.labels.bin")
+    print("exported target only", organ)
 
 
 LABELS = {"blob": "Blob", "liver": "Liver", "kidney": "Kidney", "heart": "Heart", "lung": "Lung"}

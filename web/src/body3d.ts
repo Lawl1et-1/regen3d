@@ -101,9 +101,11 @@ export class BodyView3D {
   hovered: OrganId | null = null;
   focused: OrganId | null = null;
   private focusAmt = 0; // 0 = whole body, 1 = organ isolated
-  private tween: { from: [THREE.Vector3, THREE.Vector3]; to: [THREE.Vector3, THREE.Vector3]; t: number; dur: number } | null = null;
+  private tween: { from: [THREE.Vector3, THREE.Vector3]; to: [THREE.Vector3, THREE.Vector3]; start: number; dur: number } | null = null;
   private home = { pos: new THREE.Vector3(0, 0.3, 3.9), target: new THREE.Vector3(0, 0.12, 0) };
   onFrame?: (dt: number) => void;
+  /** When false the mesh scene is not drawn (the GPU organ volume covers it). */
+  renderEnabled = true;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -225,13 +227,24 @@ export class BodyView3D {
   }
 
   private startTween(pos: THREE.Vector3, target: THREE.Vector3, dur: number) {
-    this.tween = { from: [this.camera.position.clone(), this.controls.target.clone()], to: [pos, target], t: 0, dur };
+    this.tween = { from: [this.camera.position.clone(), this.controls.target.clone()], to: [pos, target], start: performance.now(), dur };
   }
 
   get tweening() { return !!this.tween; }
 
+  /** Left drag cuts (handled outside), right drag rotates; one finger cuts, two fingers rotate/zoom. */
+  setCutControls(on: boolean) {
+    this.controls.mouseButtons = on
+      ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
+      : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    this.controls.touches = on
+      ? { ONE: null as unknown as THREE.TOUCH, TWO: THREE.TOUCH.DOLLY_ROTATE }
+      : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    this.controls.autoRotateSpeed = on ? 0 : 0.6;
+  }
+
   frame() {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    const dt = Math.min(this.clock.getDelta(), 0.5);
     const time = this.clock.elapsedTime;
     this.xray += (this.xrayTarget - this.xray) * (1 - Math.exp(-dt * 5));
     const fTarget = this.focused ? 1 : 0;
@@ -239,11 +252,11 @@ export class BodyView3D {
 
     if (this.tween) {
       const tw = this.tween;
-      tw.t = Math.min(1, tw.t + dt / tw.dur);
-      const e = tw.t < 0.5 ? 4 * tw.t ** 3 : 1 - (-2 * tw.t + 2) ** 3 / 2;
+      const t = Math.min(1, (performance.now() - tw.start) / 1000 / tw.dur);
+      const e = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
       this.camera.position.lerpVectors(tw.from[0], tw.to[0], e);
       this.controls.target.lerpVectors(tw.from[1], tw.to[1], e);
-      if (tw.t >= 1) this.tween = null;
+      if (t >= 1) this.tween = null;
     }
     this.controls.enabled = !this.tween;
     this.controls.autoRotate = !!this.focused && !this.tween;
@@ -275,6 +288,6 @@ export class BodyView3D {
     floor.visible = bodyFade > 0.02;
     this.bloom.strength = 0.25 + 0.3 * this.xray * bodyFade;
     this.onFrame?.(dt);
-    this.composer.render(dt);
+    if (this.renderEnabled) this.composer.render(dt);
   }
 }

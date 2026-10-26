@@ -108,7 +108,11 @@ fn fsComposite(i: VOut) -> @location(0) vec4f {
   var o = aces(c);
   let v = i.uv - 0.5;
   o *= 1.0 - pu.vignette * dot(v, v) * 1.6;
+  o = max(o, vec3f(0.0));
   o = pow(o, vec3f(1.0 / 2.2));
   o += (hash(i.uv * dims + pu.time * 61.0) - 0.5) * pu.grain;
+  // background matches the body view (#05070b) where no tissue was hit
+  let cov = textureSampleLevel(depthTex, smp, i.uv, 0.0).y;
+  o += vec3f(0.0196, 0.0275, 0.0431) * (1.0 - cov);
   return vec4f(o, 1.0);
 }

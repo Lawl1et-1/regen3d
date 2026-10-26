@@ -21,6 +21,7 @@ struct U {
   cutAge: vec4f,
   inj: array<vec4f, 4>,
   focus: vec4f,    // tint rgb, tintAmt (UNRECOVERABLE red hologram)
+  tissue: vec4f,   // parenchyma colour of this organ
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -170,6 +171,35 @@ fn histology(p: vec3f, nrm: vec3f) -> vec3f {
   return col;
 }
 
+// Clean stylised cross-section of the tissue (no blood): soft lobules in the
+// parenchyma, cut vessels as dark red rings, veins as blue-violet rings, a thin pale capsule.
+fn section(p: vec3f, nrm: vec3f) -> vec3f {
+  let a = S0(p); let b = S1(p);
+  var up = vec3f(0.0, 1.0, 0.0);
+  if (abs(nrm.y) > 0.9) { up = vec3f(1.0, 0.0, 0.0); }
+  let ux = normalize(cross(up, nrm)); let uy = cross(nrm, ux);
+  let q = vec2f(dot(p, ux), dot(p, uy)) * u.res.z * 0.5;
+  let base = mix(u.tissue.rgb, vec3f(1.0, 0.80, 0.76), 0.32);
+  let lob = voronoi(q * 0.9);
+  let edge = smoothstep(0.38, 0.5, lob.x);
+  let fine = vnoise(vec3f(q * 5.0, 1.0));
+  var col = base * (0.94 + 0.04 * fine + 0.05 * lob.y) * (1.0 - 0.22 * edge);
+  let centre = 1.0 - smoothstep(0.0, 0.12, lob.x);
+  col = mix(col, u.tissue.rgb * 0.6, centre * 0.35);
+  // cut vessels: a soft darker ring with a dark lumen (no blood)
+  let ves = a.w;
+  let wall = smoothstep(0.3, 0.5, ves) * (1.0 - smoothstep(0.6, 0.8, ves));
+  let lumen = smoothstep(0.62, 0.85, ves);
+  col = mix(col, u.tissue.rgb * vec3f(1.15, 0.55, 0.55), wall * 0.8);
+  col = mix(col, vec3f(0.16, 0.03, 0.04), lumen * 0.9);
+  let dr = b.x;
+  let dwall = smoothstep(0.3, 0.5, dr) * (1.0 - smoothstep(0.6, 0.8, dr));
+  col = mix(col, vec3f(0.42, 0.36, 0.55), dwall * 0.7);
+  col = mix(col, vec3f(0.10, 0.08, 0.16), smoothstep(0.62, 0.85, dr) * 0.9);
+  col = mix(col, min(u.tissue.rgb * 1.6 + 0.05, vec3f(1.0)), smoothstep(0.35, 0.7, a.y) * 0.3);
+  return col;
+}
+
 struct March {
   col: vec3f,
   trans: f32,
@@ -253,29 +283,24 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
       let w4 = clamp(vec4f(s0.y, s0.z, s0.w, s1.x), vec4f(0.0), vec4f(1.0));
       let wn = w4 / max(dot(w4, vec4f(1.0)), 0.05);
       let pf = PF(p);
-      var albedo = wn.x * CAP + wn.y * PAR + wn.z * VES + wn.w * DRN;
-      var sigma = dot(wn, vec4f(11.0, 38.0, 55.0, 46.0)) * dens;
+      let capCol = mix(u.tissue.rgb, vec3f(0.95, 0.85, 0.82), 0.08);
+      var albedo = wn.x * capCol + wn.y * u.tissue.rgb + wn.z * VES + wn.w * DRN;
+      var sigma = dot(wn, vec4f(30.0, 42.0, 55.0, 46.0)) * dens;
       var emit = vec3f(0.0);
       var specAmt = 0.0;
       var N = vec3f(0.0, 1.0, 0.0);
       let needN = T > 0.03;
       if (needN) { N = normalAt(p, 1.0 / n); }
 
-      // cut faces: stained cross-section while the wound is fresh
+      // fresh cut surface: clean stylised cross-section where the wound is
       var cf = 0.0;
       var cutCol = vec3f(0.0);
-      if (u.flags.z > 0.5 && dens > 0.3) {
-        let wnd = S2(p).x;
-        for (var k = 0; k < 4; k++) {
-          if (u.cutAge[k] >= 0.0) {
-            let dpl = abs(dot(p, u.cuts[k].xyz) - u.cuts[k].w);
-            let c = (1.0 - smoothstep(1.5 / n, 3.5 / n, dpl)) * smoothstep(0.05, 0.35, wnd);
-            if (c > cf) {
-              cf = c;
-              let fresh = exp(-u.cutAge[k] * 2.0);
-              cutCol = histology(p, u.cuts[k].xyz) * (0.8 + 0.3 * max(dot(N, L), 0.0)) + vec3f(1.0, 0.92, 0.88) * fresh * 3.0;
-            }
-          }
+      if (u.flags.z > 0.5 && dens > 0.3 && !surf) {
+        cf = smoothstep(0.12, 0.4, S2(p).x);
+        if (cf > 0.0) {
+          let lit = 0.72 + 0.4 * max(dot(N, L), 0.0);
+          cutCol = section(p, N) * lit;
+          emit += vec3f(0.6, 0.95, 1.0) * exp(-max(u.cutAge[0], 0.0) * 5.0) * cf * 1.2;
         }
       }
 
@@ -285,22 +310,22 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
         let sss = exp(-tl * vec3f(0.85, 2.3, 3.1) * 1.1);
         let wrap = max((dot(N, L) + 0.45) / 1.45, 0.0);
         let occ = clamp(1.0 - 0.55 * A(p + N * 0.07) - 0.35 * A(p + N * 0.16), 0.15, 1.0);
-        let key = vec3f(1.0, 0.94, 0.86) * 1.55;
+        let key = vec3f(1.0, 0.94, 0.86) * 1.25;
         let shadow = mix(sss, vec3f(1.0), 0.3);
         var c = albedo * (key * wrap * shadow * 0.55 + vec3f(0.30, 0.34, 0.42) * occ * 0.55);
         c += albedo * sss * key * 0.32 * (0.4 + 0.6 * wn.y + 0.8 * wn.x);
         let rim = pow(1.0 - abs(dot(N, V)), 3.0);
-        c += vec3f(0.45, 0.6, 0.85) * rim * occ * 0.9 * (0.3 + wn.x);
+        c += vec3f(0.45, 0.6, 0.85) * rim * occ * 0.3 * (0.3 + wn.x);
         let perfused = smoothstep(0.0, 0.02, pf);
         let pulse = 1.0 + u.params2.z * 3.0 * exp(-pow((pf - u.params2.y) / 0.05, 2.0)) * perfused;
-        emit += wn.z * vec3f(0.95, 0.04, 0.07) * (0.25 + 0.9 * perfused) * pulse;
-        emit += wn.w * vec3f(0.10, 0.12, 0.45) * 0.5;
+        emit += wn.z * vec3f(0.95, 0.04, 0.07) * 0.12 * perfused * (pulse - 1.0) * (1.0 - cf);
+        emit += wn.w * vec3f(0.10, 0.12, 0.45) * 0.15 * (1.0 - cf);
         // signal waves: hidden-channel activity glowing around the wound
         let act = s1.w;
         let sig = smoothstep(0.03, 0.3, act) * u.params2.x;
         emit += vec3f(0.25, 0.85, 1.0) * sig * (0.55 + 0.45 * sin(time * 5.0 - act * 30.0)) * 0.9;
         albedo = c;
-        specAmt = 0.25 + 0.75 * wn.x;
+        specAmt = (0.25 + 0.75 * wn.x) * (1.0 - cf);
       } else if (mode < 1.5) {
         // ---------------- cell-type map
         let ct = wn.x * CT_CAP + wn.y * CT_PAR + wn.z * CT_VES + wn.w * CT_DRN;
@@ -370,7 +395,7 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
           surf = true;
           res.depth = t / scale;
           if (mode < 0.5 || mode > 4.5) {
-            let wet = normalize(N + (vec3f(vnoise(p * 40.0), vnoise(p * 40.0 + 7.0), vnoise(p * 40.0 + 13.0)) - 0.5) * 0.18);
+            let wet = normalize(N + (vec3f(vnoise(p * 40.0), vnoise(p * 40.0 + 7.0), vnoise(p * 40.0 + 13.0)) - 0.5) * 0.08);
             let H = normalize(L + V);
             let ndh = max(dot(wet, H), 0.0);
             let ndv = max(dot(N, V), 0.0);

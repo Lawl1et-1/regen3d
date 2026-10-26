@@ -65,7 +65,65 @@ def tunnel(x: torch.Tensor, radius_range=(1.5, 5.0)) -> torch.Tensor:
     return x * (perp.norm(dim=-1) > r).float()
 
 
-DAMAGES = {"sphere": sphere, "plane": plane, "tunnel": tunnel}
+def wedge_region(n: int, e, nrm, v, u, s0, s1, depth, w0, device="cpu") -> torch.Tensor:
+    """Bool mask of the swipe incision (same as wedgeDist in web/src/shaders/fields.wgsl).
+
+    e: entry point on the surface (voxels), nrm: blade-plane normal, v: direction into
+    the tissue, u: along the stroke; [s0, s1] stroke extent, depth and half-width in voxels.
+    """
+    p = _coords(n, device)
+    t = lambda a: torch.as_tensor(a, dtype=torch.float32, device=device)  # noqa: E731
+    d = p - t(e)
+    tt = d @ t(v)
+    ss = d @ t(u)
+    aa = (d @ t(nrm)).abs()
+    w = w0 * (1.0 - 0.7 * (tt / depth).clamp(0.0, 1.0))
+    sd = torch.maximum(torch.maximum(aa - w, tt - depth), torch.maximum(s0 - ss, ss - s1))
+    return sd < 0
+
+
+def _orthonormal(v: torch.Tensor):
+    a = torch.tensor([1.0, 0.0, 0.0]) if abs(v[0]) < 0.9 else torch.tensor([0.0, 1.0, 0.0])
+    u = torch.linalg.cross(v, a)
+    u = u / u.norm()
+    return u, torch.linalg.cross(v, u)
+
+
+def wedge(x: torch.Tensor, depth_range=(0.15, 0.9), width_range=(1.5, 3.5)) -> torch.Tensor:
+    """Random swipe incision, as a user would make it: pick a view direction, a blade
+    plane containing it, the entry point where that plane meets the visible surface,
+    a stroke extent and a depth (fraction of the tissue thickness along the view)."""
+    n = x.shape[-1]
+    dev = x.device
+    alive = x[0] > 0.1
+    if alive.sum() < 10:
+        return x
+    v = _random_dir("cpu")                       # camera looks along v
+    u_, w_ = _orthonormal(v)
+    ang = torch.rand(1).item() * 3.14159
+    u = u_ * torch.cos(torch.tensor(ang)) + w_ * torch.sin(torch.tensor(ang))   # stroke direction
+    nrm = torch.linalg.cross(u, v)               # blade plane contains u and v
+    pts = _coords(n, dev)[alive]                 # (A, 3)
+    c = pts[torch.randint(len(pts), (1,)).item()]
+    # entry: the frontmost alive voxel near the blade line through c
+    rel = pts - c
+    near = ((rel @ nrm.to(dev)).abs() < 1.5) & ((rel @ u.to(dev)).abs() < 1.5)
+    cand = pts[near] if near.any() else pts
+    tv = cand @ v.to(dev)
+    e = cand[tv.argmin()]
+    thick = (tv.max() - tv.min()).item() + 1.0
+    depth = max(2.0, thick * (depth_range[0] + torch.rand(1).item() * (depth_range[1] - depth_range[0])))
+    su = pts @ u.to(dev)
+    lo, hi = su.min().item(), su.max().item()
+    se = (e @ u.to(dev)).item()
+    s0 = se - (se - lo) * (0.3 + 0.7 * torch.rand(1).item()) - 1.0
+    s1 = se + (hi - se) * (0.3 + 0.7 * torch.rand(1).item()) + 1.0
+    w0 = width_range[0] + torch.rand(1).item() * (width_range[1] - width_range[0])
+    m = wedge_region(n, e.tolist(), nrm.tolist(), v.tolist(), u.tolist(), s0 - se, s1 - se, depth, w0, dev)
+    return x * (~m).float()
+
+
+DAMAGES = {"sphere": sphere, "plane": plane, "tunnel": tunnel, "wedge": wedge}
 
 
 def random_damage(x: torch.Tensor, kinds=("sphere", "plane", "tunnel"),

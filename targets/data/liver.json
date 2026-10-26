@@ -3,21 +3,21 @@
   "n": 48,
   "channels": 16,
   "seed": [
-    23,
-    25,
+    19,
+    29,
     25
   ],
   "hilum": [
-    25,
-    14,
-    25
+    21,
+    24,
+    21
   ],
   "counts": {
-    "empty": 100520,
-    "capsule": 2143,
-    "parenchyma": 6113,
-    "vessel": 1485,
-    "drain": 331
+    "empty": 100279,
+    "capsule": 2430,
+    "parenchyma": 5919,
+    "vessel": 1560,
+    "drain": 404
   },
   "labels": [
     "empty",
@@ -25,5 +25,14 @@
     "parenchyma",
     "vessel",
     "drain"
-  ]
+  ],
+  "world": {
+    "center": [
+      -0.011466700583696365,
+      0.3128013610839844,
+      0.02249310538172722
+    ],
+    "half": 0.13168660402297974
+  },
+  "source": "BodyParts3D liver surface (CC BY 4.0) + procedural vessels"
 }

@@ -10,6 +10,8 @@ struct Field {
   p0: vec4f,       // centre xyz (voxels), radius
   p1: vec4f,       // segment end xyz / plane normal xyz + offset
   p2: vec4f,       // nutrient: lambda, toxin: diffusion, decay, amount
+  p3: vec4f,       // wedge: depth direction xyz (into tissue), s0
+  p4: vec4f,       // wedge: stroke direction xyz, s1
 };
 
 @group(0) @binding(0) var<uniform> F: Field;
@@ -32,12 +34,26 @@ fn segDist(p: vec3f, a: vec3f, b: vec3f) -> f32 {
   return length(p - (a + ab * t));
 }
 
+// Swipe incision (same definition as train/damage.py::wedge): a slab around the
+// blade plane, entering from the surface point e along v to a given depth,
+// limited to [s0, s1] along the stroke, narrowing towards the bottom of the cut.
+fn wedgeDist(p: vec3f) -> f32 {
+  let d = p - F.p0.xyz;
+  let depth = F.p0.w;
+  let t = dot(d, F.p3.xyz);
+  let s = dot(d, F.p4.xyz);
+  let a = abs(dot(d, F.p1.xyz));
+  let w = F.p1.w * (1.0 - 0.7 * clamp(t / depth, 0.0, 1.0));
+  return max(max(a - w, t - depth), max(F.p3.w - s, s - F.p4.w));
+}
+
 // signed distance to the removed region (negative = removed)
 fn toolDist(p: vec3f) -> f32 {
   switch (F.kind) {
     case 1u: { return length(p - F.p0.xyz) - F.p0.w; }                 // sphere
     case 2u: { return segDist(p, F.p0.xyz, F.p1.xyz) - F.p0.w; }       // scalpel stroke (capsule)
     case 3u: { return F.p1.w - dot(p, F.p1.xyz); }                     // half-space: removes dot(p,n) > d
+    case 5u: { return wedgeDist(p); }                                  // swipe incision
     default: { return 1e9; }
   }
 }
@@ -58,8 +74,8 @@ fn tool(@builtin(global_invocation_id) gid: vec3u) {
   if (sd < 0.0) {
     for (var k = 0u; k < 4u; k++) { state[i * 4u + k] = vec4f(0.0); }
     wound[i] = 0.0; act[i] = 0.0; toxinA[i] = 0.0;
-  } else if (sd < 2.5 && state[i * 4u].x > 0.1) {
-    wound[i] = max(wound[i], 1.0 - sd / 2.5);
+  } else if (sd < 1.6 && state[i * 4u].x > 0.1) {
+    wound[i] = max(wound[i], 1.0 - sd / 1.6);
   }
 }
 

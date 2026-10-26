@@ -3,9 +3,11 @@
 import rayCode from './shaders/raymarch.wgsl?raw';
 import postCode from './shaders/post.wgsl?raw';
 import partCode from './shaders/particles.wgsl?raw';
-import type { OrbitCamera } from './camera';
 import { invert, mat4, type M4, type V3 } from './math';
 import type { Simulation } from './sim';
+
+/** What the renderer needs from a camera (filled from the Three.js camera). */
+export interface CamLike { viewProj: Float32Array; invViewProj: Float32Array; eye: V3; dist: number }
 
 export const MODES = ['Realistic', 'Cell types', 'X-ray', 'Hidden signals', 'Nutrient', 'Histology'] as const;
 
@@ -22,6 +24,7 @@ export interface VolumeView {
   cuts?: Cut[];
   injuries?: Injury[];
   compare?: boolean;
+  tissue?: [number, number, number, number];
 }
 
 export interface FrameOpts {
@@ -160,8 +163,8 @@ export class Renderer {
     }
   }
 
-  private writeVolumeUniforms(buf: GPUBuffer, cam: OrbitCamera, v: VolumeView, o: FrameOpts, w: number, h: number) {
-    const f = new Float32Array(132);
+  private writeVolumeUniforms(buf: GPUBuffer, cam: CamLike, v: VolumeView, o: FrameOpts, w: number, h: number) {
+    const f = new Float32Array(136);
     f.set(cam.invViewProj, 0);
     f.set(cam.viewProj, 16);
     f.set(invert(v.toWorld), 32);
@@ -172,7 +175,7 @@ export class Renderer {
     f.set([...o.clip.n, o.clip.d], 76);
     f.set([o.hiddenGain, v.ghostAmt ?? 0, v.dissolve ?? 0, 0.12], 80);
     f.set([o.signalGain, o.pulseFront, o.pulseAmt, this.frame % 64], 84);
-    f.set([o.clip.on && o.mode === 5 ? 1 : 0, v.compare ? 1 : 0, (v.cuts?.length ?? 0) > 0 ? 1 : 0, buf === this.uMain ? 1 : 0], 88);
+    f.set([o.clip.on && o.mode === 5 ? 1 : 0, v.compare ? 1 : 0, (v.cuts?.length ?? 0) > 0 ? 1 : 0, 0], 88);
     const cuts = v.cuts ?? [];
     for (let i = 0; i < 4; i++) {
       const c = cuts[i];
@@ -184,6 +187,7 @@ export class Renderer {
       if (j) f.set([...j.p, j.age], 112 + i * 4); else f.set([0, 0, 0, -1], 112 + i * 4);
     }
     f.set(v.ghostTint ?? [0, 0, 0, 0], 128);
+    f.set(v.tissue ?? [0.86, 0.40, 0.37, 1], 132);
     this.device.queue.writeBuffer(buf, 0, f);
   }
 
@@ -225,7 +229,7 @@ export class Renderer {
   }
 
   /** Render one frame. `main` is the healing organ; `piece` an optional second volume. */
-  render(enc: GPUCommandEncoder, cam: OrbitCamera, main: VolumeView, piece: VolumeView | null, o: FrameOpts,
+  render(enc: GPUCommandEncoder, cam: CamLike, main: VolumeView, piece: VolumeView | null, o: FrameOpts,
     dt: number, out?: GPUTextureView) {
     const canvas = this.ctx.canvas as HTMLCanvasElement;
     const w = canvas.width, h = canvas.height;
@@ -276,7 +280,7 @@ export class Renderer {
     cp.end();
   }
 
-  private particles(enc: GPUCommandEncoder, cam: OrbitCamera, main: VolumeView, piece: VolumeView | null, o: FrameOpts, dt: number, aspect: number) {
+  private particles(enc: GPUCommandEncoder, cam: CamLike, main: VolumeView, piece: VolumeView | null, o: FrameOpts, dt: number, aspect: number) {
     const f = new Float32Array(72);
     f.set(cam.viewProj, 0);
     f.set(main.toWorld, 16);
