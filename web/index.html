@@ -4,17 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>REGEN 3D</title>
-  <meta name="description" content="A learned 3D cellular automaton grows a virtual organ and regenerates it after you cut it." />
+  <meta name="description" content="A learned 3D cellular automaton analyses and repairs lesions in virtual organs." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <canvas id="gpu"></canvas>
-  <canvas id="overlay"></canvas>
+  <canvas id="three"></canvas>
   <div id="ui"></div>
-  <div id="disclaimer">Simulation of a learned computational model — not a medical tool, and not how real organs heal.</div>
+  <footer id="disclaimer">
+    <span>Simulation — not a medical tool.</span>
+    <span class="credit">Anatomy: BodyParts3D, © The Database Center for Life Science, CC BY 4.0</span>
+  </footer>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

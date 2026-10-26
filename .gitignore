@@ -4,3 +4,4 @@ web/dist/
 train/runs/
 __pycache__/
 *.pyc
+assets_src/

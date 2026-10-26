@@ -1,0 +1,2 @@
+it     0  loss 0.06269  ovf 0.0000  steps 103  lr 2.0e-03       3s
+it    20  loss 0.05738  ovf 0.0000  steps 84  lr 2.0e-03      93s
