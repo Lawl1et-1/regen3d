@@ -1,5 +1,10 @@
 [
  {
+  "name": "kidney",
+  "label": "Kidney",
+  "n": 48
+ },
+ {
   "name": "liver",
   "label": "Liver",
   "n": 48

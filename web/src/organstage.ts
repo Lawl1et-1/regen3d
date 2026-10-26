@@ -6,7 +6,7 @@ import { initGPU } from './gpu';
 import { invert, mat4, transformDir, v3, type M4, type V3 } from './math';
 import { Renderer, type CamLike, type FrameOpts } from './renderer';
 import { Scene } from './scene';
-import { Diagnosis, liveStepsPerSec, type DiagnosisResult } from './diagnosis';
+import { Diagnosis, liveStepsPerSec, nextFrame, type DiagnosisResult } from './diagnosis';
 import { RepairTracker, type RepairOutcome, type RepairState } from './repair';
 import { asSummary, holeFillFrames } from './baseline';
 import type { Metrics } from './metrics';
@@ -251,7 +251,7 @@ export class OrganStage {
         }
         if (token !== this.viewToken) return;
         emit(k);
-        await new Promise((res) => requestAnimationFrame(() => res(null)));
+        await nextFrame();
         if (token !== this.viewToken) return;
       }
       rows[k].done = true;

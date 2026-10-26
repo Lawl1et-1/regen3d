@@ -44,7 +44,13 @@ export interface DiagnosisResult {
 
 export interface Progress { done: number; running: boolean; rollouts: RolloutResult[] }
 
-const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+/** Yield to rendering between chunks; falls back to a timer when frames are paused (background tab). */
+export const nextFrame = () => new Promise<void>((r) => {
+  let done = false;
+  const go = () => { if (!done) { done = true; r(); } };
+  requestAnimationFrame(go);
+  setTimeout(go, 60);
+});
 
 export class Diagnosis {
   private token = 0;

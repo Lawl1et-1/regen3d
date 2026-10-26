@@ -319,8 +319,12 @@ Promise.all([view.load(`${import.meta.env.BASE_URL}models/body.glb`), organList]
   .then(() => {
     const loop = () => { view.frame(); requestAnimationFrame(loop); };
     loop();
-    const dev = location.hash.slice(1) as OrganId;
-    if (import.meta.env.DEV && dev in MODELS) select(dev);
+    if (import.meta.env.DEV) {
+      // dev shortcuts: #liver, #kidney... opens that organ; __select('kidney', 'kidney_right') picks a side
+      (window as unknown as { __select: (id: OrganId, node?: string) => void }).__select = (id, node) => { view.pickedNode = node ?? null; select(id); };
+      const dev = location.hash.slice(1) as OrganId;
+      if (dev in MODELS) select(dev);
+    }
   })
   .catch((err) => {
     console.error(err);
