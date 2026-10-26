@@ -11,8 +11,12 @@ struct Params {
   hiddenSel: u32,
   fireRate: f32,
   woundDecay: f32,
-  toxinKill: f32,
+  ischemiaRate: f32,
   freeze: u32,
+  gate: u32,
+  _a: u32,
+  _b: u32,
+  _c: u32,
 };
 
 struct Ctrl {

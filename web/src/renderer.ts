@@ -26,7 +26,7 @@ export interface VolumeView {
   compare?: boolean;
   tissue?: [number, number, number, number];
   /** diagnosis overlay strengths: uncertainty (orange), critical area (red) */
-  diag?: [number, number];
+  diag?: [number, number, number?];
 }
 
 export interface FrameOpts {
@@ -191,7 +191,7 @@ export class Renderer {
     }
     f.set(v.ghostTint ?? [0, 0, 0, 0], 128);
     f.set(v.tissue ?? [0.86, 0.40, 0.37, 1], 132);
-    f.set([v.diag?.[0] ?? 0, v.diag?.[1] ?? 0, o.time, 0], 136);
+    f.set([v.diag?.[0] ?? 0, v.diag?.[1] ?? 0, o.time, v.diag?.[2] ?? 0], 136);
     this.device.queue.writeBuffer(buf, 0, f);
   }
 

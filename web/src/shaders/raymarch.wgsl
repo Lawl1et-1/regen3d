@@ -22,7 +22,7 @@ struct U {
   inj: array<vec4f, 4>,
   focus: vec4f,    // tint rgb, tintAmt (UNRECOVERABLE red hologram)
   tissue: vec4f,   // parenchyma colour of this organ
-  diag: vec4f,     // diagnosis overlay: uncertainty strength, critical strength, time
+  diag: vec4f,     // diagnosis overlay: uncertainty strength, critical strength, time, lesion highlight (vessels view)
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -308,6 +308,11 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
         }
       }
 
+      // blood supply (share of the healthy supply): starving tissue turns pale
+      let supply = s1.z;
+      let pale = (1.0 - smoothstep(0.1, 0.5, supply)) * (1.0 - wn.z);
+      albedo = mix(albedo, vec3f(0.42, 0.40, 0.46) * (0.55 + 0.45 * dot(albedo, vec3f(0.33))), pale * 0.85);
+
       if (mode < 0.5) {
         // ---------------- realistic
         let tl = A(p + L * 0.05) + A(p + L * 0.12) + 1.6 * A(p + L * 0.26);
@@ -343,7 +348,11 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
         albedo = vec3f(0.0);
         let perfused = smoothstep(0.0, 0.02, pf);
         let pulse = 1.0 + u.params2.z * 3.0 * exp(-pow((pf - u.params2.y) / 0.05, 2.0)) * perfused;
-        emit = wn.z * vec3f(1.6, 0.10, 0.18) * (0.35 + perfused) * pulse * 2.0
+        // vessels the AI is regrowing inside the wound glow cyan-white; blood (perfusion) red
+        let fresh = smoothstep(0.3, 0.7, axs.g) * u.diag.w;
+        let vcol = mix(vec3f(1.6, 0.10, 0.18) * (0.15 + perfused) * pulse, vec3f(0.6, 1.4, 1.8) * (0.6 + 0.8 * perfused * pulse), fresh);
+        let starved = (1.0 - smoothstep(0.1, 0.5, supply)) * (wn.x + wn.y);
+        emit = wn.z * vcol * 2.0 + starved * vec3f(0.35, 0.3, 0.6) * 0.6
              + wn.w * vec3f(0.25, 0.45, 1.6) * 1.4
              + (wn.x + wn.y) * vec3f(0.12, 0.2, 0.32) * (0.15 + edge * 1.5) * 4.0;
       } else if (mode < 3.5) {

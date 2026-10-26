@@ -80,7 +80,9 @@ fn tool(@builtin(global_invocation_id) gid: vec3u) {
 }
 
 // one Jacobi iteration of steady-state diffusion with consumption:
-//   perfused vessel voxels are sources (n = 1); tissue: n = sum(tissue neighbours) / (6 + lambda)
+//   perfused vessel voxels are sources (n = 1); tissue: n = sum(tissue neighbours) / (6 + lambda);
+//   an empty voxel gets what leaks from the tissue around it (so growth can only advance
+//   from walls that are themselves supplied)
 @compute @workgroup_size(4, 4, 4)
 fn nutrient(@builtin(global_invocation_id) gid: vec3u) {
   let g = vec3i(gid);
@@ -91,6 +93,14 @@ fn nutrient(@builtin(global_invocation_id) gid: vec3u) {
   if (textureLoad(perf, g, 0).r > 0.0) {
     v = 1.0;
   } else if (a > 0.1) {
+    var s = 0.0;
+    let o = array<vec3i, 6>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 1, 0), vec3i(0, -1, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
+    for (var k = 0u; k < 6u; k++) {
+      let q = g + o[k];
+      if (inside(q) && alphaAt(q) > 0.1) { s += nutA[idx(q)]; }
+    }
+    v = s / (6.0 + F.p2.x);
+  } else {
     var s = 0.0;
     let o = array<vec3i, 6>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 1, 0), vec3i(0, -1, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
     for (var k = 0u; k < 6u; k++) {

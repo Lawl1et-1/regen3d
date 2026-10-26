@@ -152,6 +152,8 @@ export class Simulation {
   readonly toxB: GPUBuffer;
   readonly nutA: GPUBuffer;
   readonly nutB: GPUBuffer;
+  /** nutrient each voxel receives in the healthy organ (the reference for the blood-supply constraint) */
+  readonly nutRef: GPUBuffer;
   readonly ctrl: GPUBuffer;
   readonly summary: GPUBuffer;
   readonly tex: GPUTexture[];
@@ -171,6 +173,8 @@ export class Simulation {
   steps = 0;
   hiddenSel = 0;
   frozen = false;
+  blood = false;
+  private seed = 1234;
   toxinActive = 0;
 
   constructor(readonly k: SimKernels, readonly label = 'sim') {
@@ -188,9 +192,10 @@ export class Simulation {
     this.toxB = buf(v * 4);
     this.nutA = buf(v * 4);
     this.nutB = buf(v * 4);
+    this.nutRef = buf(v * 4);
     this.summary = buf(v * 4);
     this.ctrl = buf(16);
-    this.params = d.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.params = d.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.fieldU = d.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.packU = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.staging = [0, 1].map(() =>
@@ -217,7 +222,7 @@ export class Simulation {
     this.maskBG = d.createBindGroup({
       layout: k.maskPipe.getBindGroupLayout(0),
       entries: [e(0, this.params), e(1, this.next), e(2, this.state), e(3, this.pre), e(4, this.wound),
-        e(5, this.toxA), e(6, this.ctrl), e(7, this.growth)],
+        e(5, this.toxA), e(6, this.ctrl), e(7, this.nutA), e(8, this.nutRef)],
     });
     this.fieldBG = d.createBindGroup({
       layout: k.fieldLayout,
@@ -226,7 +231,7 @@ export class Simulation {
     });
     this.packBG = d.createBindGroup({
       layout: k.packPipe.getBindGroupLayout(0),
-      entries: [e(0, this.packU), e(1, this.state), e(2, this.wound), e(3, this.nutA), e(4, this.act),
+      entries: [e(0, this.packU), e(1, this.state), e(2, this.wound), e(3, this.nutA), e(4, this.act), e(5, this.nutRef),
         { binding: 7, resource: this.tex[0].createView() },
         { binding: 8, resource: this.tex[1].createView() },
         { binding: 9, resource: this.tex[2].createView() },
@@ -239,11 +244,13 @@ export class Simulation {
   private get wg() { return Math.ceil(this.n / 4); }
 
   writeParams(seed = 1234) {
-    const b = new ArrayBuffer(32);
+    this.seed = seed;
+    const b = new ArrayBuffer(48);
     const u = new Uint32Array(b);
     const f = new Float32Array(b);
     u[0] = this.n; u[1] = this.k.hidden; u[2] = seed; u[3] = this.hiddenSel;
-    f[4] = this.k.organ.meta.fire_rate; f[5] = 0.985; f[6] = 0.35; u[7] = this.frozen ? 1 : 0;
+    f[4] = this.k.organ.meta.fire_rate; f[5] = 0.985; f[6] = 1 / 40; u[7] = this.frozen ? 1 : 0;
+    u[8] = this.blood ? 1 : 0;
     this.k.device.queue.writeBuffer(this.params, 0, b);
   }
 
@@ -292,7 +299,7 @@ export class Simulation {
 
   copyFrom(enc: GPUCommandEncoder, o: Simulation) {
     const pairs: [GPUBuffer, GPUBuffer][] = [[o.state, this.state], [o.act, this.act], [o.wound, this.wound],
-      [o.growth, this.growth], [o.toxA, this.toxA], [o.nutA, this.nutA], [o.ctrl, this.ctrl]];
+      [o.growth, this.growth], [o.toxA, this.toxA], [o.nutA, this.nutA], [o.nutRef, this.nutRef], [o.ctrl, this.ctrl]];
     for (const [a, b] of pairs) enc.copyBufferToBuffer(a, 0, b, 0, a.size);
     enc.copyTextureToTexture({ texture: o.perfTex }, { texture: this.perfTex }, [this.n, this.n, this.n]);
     this.steps = o.steps;
@@ -428,6 +435,17 @@ export class Simulation {
     this.k.device.queue.writeBuffer(this.state, 0, s);
   }
 
+  /** Turn the blood-supply constraint on/off (needs nutRef captured from the healthy organ). */
+  setBlood(on: boolean) {
+    this.blood = on;
+    this.writeParams(this.seed);
+  }
+
+  /** Remember the current nutrient field as the healthy reference. */
+  captureNutRef(enc: GPUCommandEncoder) {
+    enc.copyBufferToBuffer(this.nutA, 0, this.nutRef, 0, this.nutA.size);
+  }
+
   setFrozen(f: boolean) {
     this.frozen = f;
     this.writeParams();
@@ -435,7 +453,7 @@ export class Simulation {
 
   destroy() {
     for (const b of [this.state, this.next, this.pre, this.act, this.wound, this.growth, this.toxA, this.toxB,
-      this.nutA, this.nutB, this.summary, this.ctrl, this.params, this.fieldU, this.packU, ...this.staging]) b.destroy();
+      this.nutA, this.nutB, this.nutRef, this.summary, this.ctrl, this.params, this.fieldU, this.packU, ...this.staging]) b.destroy();
     for (const t of [...this.tex, this.perfTex, this.auxTex]) t.destroy();
   }
 }

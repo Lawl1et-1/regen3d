@@ -6,12 +6,13 @@ import { initGPU } from './gpu';
 import { invert, mat4, transformDir, v3, type M4, type V3 } from './math';
 import { Renderer, type CamLike, type FrameOpts } from './renderer';
 import { Scene } from './scene';
-import { Diagnosis, liveStepsPerSec, nextFrame, type DiagnosisResult } from './diagnosis';
+import { Diagnosis, liveStepsPerSec, type DiagnosisResult } from './diagnosis';
 import { RepairTracker, type RepairOutcome, type RepairState } from './repair';
 import { asSummary, holeFillFrames } from './baseline';
 import type { Metrics } from './metrics';
 import { loadCheckpoint, SimKernels, Simulation, TOOL_WEDGE, type ToolOp, type Weights } from './sim';
 import { raycastTissue } from './tissue';
+import { establishBlood, measure, runWithBlood } from './blood';
 
 interface TrailPt { x: number; y: number; t: number }
 export interface CutInfo { depthMm: number; lengthMm: number }
@@ -41,6 +42,7 @@ export class OrganStage {
   private time = 0;
   ready = false;
   private needPack = true;
+  private resetToken = 0;
   private needRead = true;
   private trailDrawn = false;
   private lastVP = new Float32Array(16);
@@ -48,7 +50,6 @@ export class OrganStage {
   diagnosis: Diagnosis | null = null;
   /** class grid of the healthy organ (before any lesion), the reference for the diagnosis */
   private healthy: Uint32Array | null = null;
-  private lesioned = false;
   private diagPending = false;
   diag: [number, number] = [0, 0];
   /** idle -> (diagnosis) -> plan (hologram preview) -> repair (live) -> done */
@@ -58,6 +59,8 @@ export class OrganStage {
   private tracker: RepairTracker | null = null;
   private repairStart = 0;
   brain = false;
+  /** X-ray of the vascular tree: watch vessels regrow and blood flow back in */
+  vessels = false;
   onRepair?: (s: RepairState) => void;
   onRepairDone?: (o: RepairOutcome, forecast: DiagnosisResult) => void;
   onPlan?: () => void;
@@ -144,6 +147,7 @@ export class OrganStage {
   /** Healthy organ (the target tissue) with no lesion. */
   reset() {
     const sim = this.scene.sim;
+    sim.setBlood(false);
     sim.setFromLabels(this.scene.organ.labels);
     if (this.scene.organ.meta.hidden > 0) {
       // let the AI settle on the healthy organ first, exactly as in training
@@ -160,12 +164,24 @@ export class OrganStage {
     this.cutOps = [];
     this.lastResult = null;
     this.healthy = null;
-    this.lesioned = false;
     this.diagPending = false;
     this.scene.latestSummary = null;
     this.cutAge = -1;
     this.needPack = true;
     this.lastVP.fill(NaN);
+    void this.prepareHealthy(++this.resetToken);
+  }
+
+  /** Healthy reference: the class grid before any lesion and the blood supply of every voxel. */
+  private async prepareHealthy(token: number) {
+    const sc = this.scene;
+    if (sc.organ.meta.hidden > 0) await establishBlood(this.device, sc.sim, sc.metrics);
+    const r = await measure(this.device, sc.sim, sc.metrics);
+    if (token !== this.resetToken) return;
+    sc.latestSummary = r.sum;
+    sc.latest = r.m;
+    this.healthy = r.sum;
+    this.needPack = true;
   }
 
   /** Show the diagnosis overlay; when repairable, preview the plan then repair live. */
@@ -229,31 +245,21 @@ export class OrganStage {
       if (token !== this.viewToken) return;
       this.learnKernels.loadWeights(w);
       // same starting point as the live organ: healthy, settled by this model, then the same cuts
+      sim.setBlood(false);
       sim.setFromLabels(this.scene.organ.labels);
       sim.setStepIndex(0);
       sim.writeParams(1234);
-      let enc = this.device.createCommandEncoder();
+      const enc = this.device.createCommandEncoder();
       sim.encodeSteps(enc, 60);
       this.device.queue.submit([enc.finish()]);
+      await establishBlood(this.device, sim, this.scene.metrics);
       for (const op of this.cutOps) sim.queueTool(op);
       sim.encodeTools();
-      for (let step = 0; step <= LEARN_STEPS; step += 2) {
-        enc = this.device.createCommandEncoder();
-        if (step > 0) sim.encodeSteps(enc, 2);
-        sim.encodePack(enc);
-        const read = step % 10 === 0 ? sim.readSummary(enc) : null;
-        this.device.queue.submit([enc.finish()]);
-        await this.device.queue.onSubmittedWorkDone();
-        if (read) {
-          const sum = await read();
-          rows[k].metrics = this.scene.metrics.compute(sum);
-          rows[k].step = step;
-        }
-        if (token !== this.viewToken) return;
+      await runWithBlood(this.device, sim, this.scene.metrics, LEARN_STEPS, (step, _sum, m) => {
+        rows[k].metrics = m;
+        rows[k].step = step;
         emit(k);
-        await nextFrame();
-        if (token !== this.viewToken) return;
-      }
+      }, () => token === this.viewToken);
       rows[k].done = true;
       emit(k);
       await new Promise((res) => setTimeout(res, 900));
@@ -280,7 +286,8 @@ export class OrganStage {
     this.lastVP.fill(NaN);
   }
 
-  setBrain(on: boolean) { this.brain = on; this.lastVP.fill(NaN); }
+  setBrain(on: boolean) { this.brain = on; if (on) this.vessels = false; this.lastVP.fill(NaN); }
+  setVessels(on: boolean) { this.vessels = on; if (on) this.brain = false; this.lastVP.fill(NaN); }
 
   syncCamera(c: THREE.PerspectiveCamera, target: THREE.Vector3) {
     c.updateMatrixWorld();
@@ -390,7 +397,6 @@ export class OrganStage {
     this.cutOps.push(op);
     this.cutAge = 0;
     this.flash = 0.35;
-    this.lesioned = true;
     this.diagPending = true;
     this.diag = [0, 0];
     this.stopRepair();
@@ -443,7 +449,7 @@ export class OrganStage {
     const simChanged = this.needPack || sc.sim.pendingTools > 0 || steps > 0;
     const vp = this.cam.viewProj;
     const camChanged = vp.some((v, i) => v !== this.lastVP[i]);
-    const animating = this.view !== 'live' || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
+    const animating = this.view !== 'live' || this.vessels || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
     if (simChanged || camChanged || animating || this.needRead) {
       const enc = this.device.createCommandEncoder();
       let read = null;
@@ -458,7 +464,9 @@ export class OrganStage {
         if (read) this.needRead = false;
       }
       const opts: FrameOpts = {
-        mode: this.brain ? 3 : 0, time: this.time, hiddenGain: 1, signalGain: 0, pulseFront: 2, pulseAmt: 0,
+        mode: this.brain ? 3 : this.vessels ? 2 : 0, time: this.time, hiddenGain: 1, signalGain: 0,
+        // blood pulses travel from the hilum along every vessel still connected to it
+        pulseFront: (this.time * 0.45) % 1.3, pulseAmt: this.vessels || this.mode === 'repair' ? 1 : 0,
         clip: { on: false, n: [0, 0, 1], d: 0 }, flash: this.flash * 0.25, exposure: 1.0,
         growthRate: 0, debrisRate: 0, sparks: { a: [0, 0, 0], b: [0, 0, 0], on: false }, pieceVel: [0, 0, 0],
       };
@@ -483,16 +491,14 @@ export class OrganStage {
       const live = this.view === 'live';
       this.renderer.render(enc, this.cam, {
         sim: shown, toWorld: mainWorld, tissue: this.tissue,
-        diag: !live ? [0, 0] : this.mode === 'idle' ? this.diag : this.mode === 'done' ? [0, 0] : [this.diag[0] * (1 - this.ghost), this.diag[1]],
+        diag: !live ? [0, 0] : this.mode === 'idle' ? this.diag : this.mode === 'done' ? [0, 0, 1] : [this.diag[0] * (1 - this.ghost), this.diag[1], 1],
         ghostAmt: live ? this.ghost : 0, ghostTint: [0.35, 0.62, 1.0, 1],
         cuts: live && this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
       }, piece, opts, dt);
       this.device.queue.submit([enc.finish()]);
-      const wasLesioned = this.lesioned;
       const tracker = this.mode === 'repair' ? this.tracker : null;
       const repairStep = sc.sim.steps - this.repairStart;
       read?.().then(() => {
-        if (!wasLesioned && !this.lesioned) this.healthy = sc.latestSummary;
         // measure the live repair and detect its phases
         if (tracker && tracker === this.tracker && sc.latestSummary && sc.latest && !tracker.finished) {
           const st = tracker.update(repairStep, sc.latestSummary, sc.latest);

@@ -13,6 +13,7 @@ struct Pack {
 @group(0) @binding(2) var<storage, read> wound: array<f32>;
 @group(0) @binding(3) var<storage, read> nut: array<f32>;
 @group(0) @binding(4) var<storage, read> act: array<f32>;
+@group(0) @binding(5) var<storage, read> nutRef: array<f32>;
 @group(0) @binding(7) var tex0: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(8) var tex1: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(9) var tex2: texture_storage_3d<rgba16float, write>;
@@ -70,7 +71,10 @@ fn pack(@builtin(global_invocation_id) gid: vec3u) {
   // thin structures (1-voxel vessels) would fade under the filter: keep part of their own value
   let va = max(sa.x, a * 0.6);
   textureStore(tex0, gid, vec4f(va, sa.y, sa.z, sa.w));
-  textureStore(tex1, gid, vec4f(sd, h, nut[i], act[i]));
+  // blood supply as a share of the healthy supply (1 = normal; voxels with no healthy supply count as normal)
+  let healthyNut = nutRef[i];
+  let supply = select(clamp(nut[i] / healthyNut, 0.0, 1.0), 1.0, healthyNut < 1e-3);
+  textureStore(tex1, gid, vec4f(sd, h, supply, act[i]));
   textureStore(tex2, gid, vec4f(max(wound[i], swd / 64.0 * 1.6), brain));
 
   var cls = 0u;

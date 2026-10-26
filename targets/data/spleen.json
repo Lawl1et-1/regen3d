@@ -1,0 +1,39 @@
+{
+  "name": "spleen",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    27,
+    23,
+    19
+  ],
+  "hilum": [
+    15,
+    22,
+    23
+  ],
+  "counts": {
+    "empty": 98669,
+    "capsule": 2580,
+    "parenchyma": 7158,
+    "vessel": 1692,
+    "drain": 493
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ],
+  "world": {
+    "center": [
+      0.08539679646492004,
+      0.3052143305540085,
+      -0.007002785801887512
+    ],
+    "half": 0.052286244556307794
+  },
+  "mesh": "spleen",
+  "source": "BodyParts3D spleen (CC BY 4.0) + procedural splenic vessels"
+}

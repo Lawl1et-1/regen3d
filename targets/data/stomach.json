@@ -1,0 +1,39 @@
+{
+  "name": "stomach",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    29,
+    23,
+    25
+  ],
+  "hilum": [
+    17,
+    30,
+    27
+  ],
+  "counts": {
+    "empty": 88770,
+    "capsule": 3405,
+    "parenchyma": 14886,
+    "vessel": 2501,
+    "drain": 1030
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ],
+  "world": {
+    "center": [
+      0.0388426473364234,
+      0.3164210766553879,
+      0.037675405852496624
+    ],
+    "half": 0.07406707732006908
+  },
+  "mesh": "stomach",
+  "source": "BodyParts3D stomach (CC BY 4.0) + procedural gastric vessels"
+}

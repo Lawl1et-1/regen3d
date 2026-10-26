@@ -1,0 +1,39 @@
+{
+  "name": "brain",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    23,
+    32,
+    21
+  ],
+  "hilum": [
+    19,
+    16,
+    27
+  ],
+  "counts": {
+    "empty": 88729,
+    "capsule": 4891,
+    "parenchyma": 12671,
+    "vessel": 3457,
+    "drain": 844
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ],
+  "world": {
+    "center": [
+      -0.0006933175027370453,
+      0.7652493715286255,
+      -0.015518557280302048
+    ],
+    "half": 0.09359521381556989
+  },
+  "mesh": "brain",
+  "source": "BodyParts3D cortex, white matter, cerebellum and brainstem (CC BY 4.0) + procedural vessels"
+}

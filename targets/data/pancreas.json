@@ -1,0 +1,39 @@
+{
+  "name": "pancreas",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    17,
+    26,
+    26
+  ],
+  "hilum": [
+    15,
+    25,
+    24
+  ],
+  "counts": {
+    "empty": 106958,
+    "capsule": 1303,
+    "parenchyma": 1596,
+    "vessel": 571,
+    "drain": 164
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ],
+  "world": {
+    "center": [
+      0.01303054392337799,
+      0.2597193419933319,
+      0.02016366575844586
+    ],
+    "half": 0.06631855890154839
+  },
+  "mesh": "pancreas",
+  "source": "BodyParts3D pancreas (CC BY 4.0) + procedural vessels and pancreatic duct"
+}

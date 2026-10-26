@@ -4,11 +4,10 @@
 // every number comes from the rollouts.
 import type { Metrics, MetricsEngine } from './metrics';
 import type { Simulation } from './sim';
+import { runWithBlood } from './blood';
 
 export const ROLLOUTS = 8;
 export const ROLLOUT_STEPS = 120;
-/** steps at which each rollout is measured: dense early, where the repair happens */
-const CHECKS = [0, 4, 8, 12, 16, 24, 32, 48, 64, 90, 120];
 const SHAPE_OK = 0.9;      // a rollout succeeds if it recovers > 90% of the shape...
 const VESSELS_OK = 0.9;    // ...with the vascular tree reconnected to the hilum
 /** Live repair speed: slow while the wound closes so the phases can be followed, then faster. */
@@ -78,58 +77,36 @@ export class Diagnosis {
     let lesion: Uint8Array | null = null;
     let postCut: Uint32Array | null = null;
     let lesionCount = 0;
-    let steps = 6;                          // GPU work per chunk, adapted to keep frames light
 
     for (let k = 0; k < ROLLOUTS; k++) {
-      // fresh copy of the lesioned organ, with its own random stream
-      let enc = this.device.createCommandEncoder();
+      // fresh copy of the lesioned organ (with its blood supply), with its own random stream
+      const enc = this.device.createCommandEncoder();
       this.fc.copyFrom(enc, this.main);
       this.device.queue.submit([enc.finish()]);
+      this.fc.blood = this.main.blood;
       this.fc.writeParams(7919 * (k + 1));
       this.fc.setStepIndex(100000 * (k + 1));
       const curve: { step: number; iou: number }[] = [];
-      let last: Metrics | null = null;
-      let lastSum: Uint32Array | null = null;
-      let ci = 0;
-      for (let s = 0; s <= ROLLOUT_STEPS;) {
-        if (s === CHECKS[ci]) {
-          ci++;
-          enc = this.device.createCommandEncoder();
-          this.fc.encodePack(enc);
-          const read = this.fc.readSummary(enc)!;
-          this.device.queue.submit([enc.finish()]);
-          const sum = await read();
-          if (token !== this.token) return;
-          last = this.metrics.compute(sum);
-          lastSum = sum;
-          curve.push({ step: s, iou: last.iou });
-          if (k === 0 && s === 0) {
-            postCut = sum;
-            lesion = new Uint8Array(nv);
-            for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) { lesion[i] = 1; lesionCount++; }
-          }
-          if (s === ROLLOUT_STEPS) break;
+      const end = { m: null as Metrics | null, sum: null as Uint32Array | null };
+      await runWithBlood(this.device, this.fc, this.metrics, ROLLOUT_STEPS, (s, sum, m) => {
+        end.m = m;
+        end.sum = sum;
+        curve.push({ step: s, iou: m.iou });
+        if (k === 0 && s === 0) {
+          postCut = sum;
+          lesion = new Uint8Array(nv);
+          for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) { lesion[i] = 1; lesionCount++; }
         }
-        const chunk = Math.min(steps, CHECKS[ci] - s);
-        const t0 = performance.now();
-        enc = this.device.createCommandEncoder();
-        this.fc.encodeSteps(enc, chunk);
-        this.device.queue.submit([enc.finish()]);
-        await this.device.queue.onSubmittedWorkDone();
-        if (token !== this.token) return;
-        const ms = performance.now() - t0;
-        steps = ms < 6 ? Math.min(15, steps + 2) : ms > 14 ? Math.max(1, steps - 2) : steps;
-        s += chunk;
-        await nextFrame();
-        if (token !== this.token) return;
-      }
-      const final = last!;
+      }, () => token === this.token);
+      if (token !== this.token) return;
+      const final = end.m!;
+      const lastSum = end.sum!;
       // the rollout is healed once it reaches 98% of where it ends up
       const healedAt = curve.find((c) => c.iou >= final.iou * 0.98)?.step ?? ROLLOUT_STEPS;
       const success = final.iou > SHAPE_OK && final.connectivity > VESSELS_OK;
       const perf = this.metrics.perfusion;
       for (let i = 0; i < nv; i++) {
-        if (lastSum![i] & 0xff) alive[i]++;
+        if (lastSum[i] & 0xff) alive[i]++;
         if (perf[i]) vessel[i]++;
       }
       this.progress.rollouts.push({ success, final, curve, healedAt });
@@ -165,10 +142,11 @@ export class Diagnosis {
       for (let i = 0; i < nv; i++) { if (!near[i]) { unc[i] *= 0.3; if (target[i] !== 3) crit[i] = 0; } }
     }
     const uD = blurMax(unc, n, 1), cD = blurMax(crit, n, 2);
+    const lesionNear = lesion ? dilate(lesion, n, 1) : new Uint8Array(nv);
     const aux = new Uint8Array(nv * 4);
     for (let i = 0; i < nv; i++) {
       aux[i * 4] = Math.round(Math.min(1, uD[i]) * 255);
-      aux[i * 4 + 1] = repairable ? 0 : Math.round(Math.min(1, cD[i]) * 255);
+      aux[i * 4 + 1] = repairable ? (lesionNear[i] ? 255 : 0) : Math.round(Math.min(1, cD[i]) * 255);
       aux[i * 4 + 2] = Math.round((alive[i] / ROLLOUTS) * 255);
       aux[i * 4 + 3] = Math.round((vessel[i] / ROLLOUTS) * 255);
     }

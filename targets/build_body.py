@@ -30,9 +30,15 @@ GROUPS = {
     "kidney_left": ["FMA7205"],
     "kidney_right": ["FMA7204"],
     "bronchi": ["FMA31739", "FMA7396", "FMA68418"],
+    "stomach": ["FMA7148"],
+    "spleen": ["FMA7196"],
+    "pancreas": ["FMA7198"],
+    # cortex gyri, white matter, cerebellum and brainstem parts (see assets_src/brain_concepts.txt)
+    "brain": (SRC / "brain_concepts.txt").read_text().split() if (SRC / "brain_concepts.txt").exists() else [],
 }
 FACES = {"skin": 28000, "muscles": 45000, "liver": 12000, "heart": 10000,
-         "kidney_left": 4000, "kidney_right": 4000, "lung_left": 8000, "lung_right": 8000}
+         "kidney_left": 4000, "kidney_right": 4000, "lung_left": 8000, "lung_right": 8000,
+         "stomach": 8000, "spleen": 5000, "pancreas": 5000, "brain": 16000}
 
 
 def element_map():
@@ -122,7 +128,7 @@ def main():
         meshes[name] = load_group(concepts, emap)
         print(f"{name}: {len(meshes[name].faces)} faces")
 
-    for k in ("liver", "heart"):
+    for k in ("liver", "heart", "stomach", "brain"):
         meshes[k] = fuse(meshes[k])
         print(f"{k}: fused -> {len(meshes[k].faces)} faces")
 

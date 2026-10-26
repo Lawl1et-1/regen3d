@@ -6,7 +6,7 @@ from the hilum with space colonisation, and a drainage tree (D) from a second ro
 (coronary veins / ureter / main bronchus). Kidneys and lungs come in pairs: one side is
 built and trained, the viewer mirrors it for the other side.
 
-    python targets/organ_target.py heart kidney lung
+    python targets/organ_target.py heart kidney lung stomach spleen pancreas brain
 """
 from __future__ import annotations
 
@@ -32,6 +32,18 @@ ORGANS = {
     "lung": dict(mesh="lung_right", side=(1.0, 0.0, 0.0), drain_offset=(0.0, 0.12, -0.04),
                  drain_out=(0.5, 1.0, 0.0), points=380,
                  label="BodyParts3D bronchial tree envelope (CC BY 4.0) + procedural vessels and airways"),
+    "stomach": dict(mesh="stomach", side=(-1.0, 0.5, 0.2), drain_offset=(0.05, 0.22, 0.0),
+                    drain_out=(0.0, 1.0, -0.2), points=320,
+                    label="BodyParts3D stomach (CC BY 4.0) + procedural gastric vessels"),
+    "spleen": dict(mesh="spleen", side=(-1.0, 0.0, 0.4), drain_offset=(0.0, -0.12, 0.0),
+                   drain_out=(-1.0, 0.0, 0.0), points=240,
+                   label="BodyParts3D spleen (CC BY 4.0) + procedural splenic vessels"),
+    "pancreas": dict(mesh="pancreas", side=(0.0, 0.0, -1.0), drain_offset=(-0.35, -0.05, 0.0),
+                     drain_out=(-1.0, -0.3, 0.0), points=280,
+                     label="BodyParts3D pancreas (CC BY 4.0) + procedural vessels and pancreatic duct"),
+    "brain": dict(mesh="brain", side=(0.0, -1.0, 0.25), drain_offset=(0.0, 0.55, -0.45),
+                  drain_out=(0.0, 0.2, -1.0), points=480,
+                  label="BodyParts3D cortex, white matter, cerebellum and brainstem (CC BY 4.0) + procedural vessels"),
 }
 
 
