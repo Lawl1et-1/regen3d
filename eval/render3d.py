@@ -69,7 +69,7 @@ def render(state: torch.Tensor, yaw=0.0, pitch=-0.12, size=320, zoom=0.82, mode=
     for m in (regrown, wound, ghost):
         extra.append((m.float() if m is not None else torch.zeros(n, n, n)).to(dev))
     vol = torch.cat([vol, torch.stack(extra)], 0)[None]  # (1, 8, n, n, n)
-    vol = _blur(vol, 0.75 if mode == "tissue" else 0.5)
+    vol = _blur(vol, 0.75 if mode == "tissue" else 0.35)
     rot = _rot(yaw, pitch)
     theta = torch.cat([rot / zoom, torch.zeros(3, 1)], 1)[None].to(dev)
     depth = size
@@ -83,8 +83,11 @@ def render(state: torch.Tensor, yaw=0.0, pitch=-0.12, size=320, zoom=0.82, mode=
 
     if mode == "xray":
         w = a.clamp(0, 1)
-        ves = ((v[3] - 0.15).clamp(min=0) * w).sum(0) / depth * 9.0
-        drn = (v[4] * w).sum(0) / depth * 6.0
+        # maximum-intensity projection keeps the branches crisp; a little sum adds depth
+        vv = (v[3] - 0.2).clamp(min=0) * w
+        dd = (v[4] - 0.2).clamp(min=0) * w
+        ves = vv.amax(0) * 1.1 + vv.sum(0) / depth * 3.0
+        drn = dd.amax(0) * 0.9 + dd.sum(0) / depth * 2.0
         tissue = w.sum(0) / depth * 2.0
         edge = (tissue - _blur2(tissue, 2.0)).abs() * 6
         img = (bg + torch.tensor([0.08, 0.16, 0.26], device=dev) * (tissue * 0.5 + edge)[..., None]
@@ -119,7 +122,7 @@ def render(state: torch.Tensor, yaw=0.0, pitch=-0.12, size=320, zoom=0.82, mode=
     rg = take(5).clamp(0, 1)[..., None]
     wd = take(6).clamp(0, 1)[..., None]
     alb = alb * (1 - wd * 0.9) + SECTION.to(dev) * wd * 0.9
-    alb = torch.lerp(alb, alb * 0.4 + REGROWN.to(dev) * 0.35, rg * 0.55)
+    alb = torch.lerp(alb, alb * 0.45 + REGROWN.to(dev) * 0.2, rg * 0.65)
     L = torch.tensor([-0.45, 0.6, 0.66], device=dev); L = L / L.norm()
     V = torch.tensor([0.0, 0.0, 1.0], device=dev)
     H = (L + V); H = H / H.norm()
@@ -131,7 +134,7 @@ def render(state: torch.Tensor, yaw=0.0, pitch=-0.12, size=320, zoom=0.82, mode=
     sss = torch.tensor([1.0, 0.35, 0.28], device=dev) * (1 - ndl.clamp(min=0))[..., None] * 0.25
     col = alb * (wrap * 1.9 * torch.tensor([1.0, 0.95, 0.9], device=dev) + 0.35) * ao + alb * sss
     col = col + spec[..., None] * (1 - wd * 0.8) + torch.tensor([0.35, 0.5, 0.75], device=dev) * rim[..., None] * 0.25
-    col = col + REGROWN.to(dev) * rg * 0.18
+    col = col + REGROWN.to(dev) * rg * 0.06
     img = torch.where(any_hit[..., None], col, bg.expand_as(col))
     if ghost is not None:
         g = (v[7] * (1 - a.clamp(0, 1))).sum(0) / depth * 4.0

@@ -100,10 +100,12 @@ def main():
     ap.add_argument("--n-damage", type=int, default=2)
     ap.add_argument("--snap-every", type=int, default=250)
     ap.add_argument("--resume", action="store_true")
-    ap.add_argument("--vram", type=float, default=0.45,
+    ap.add_argument("--vram", type=float, default=0.6,
                     help="max share of GPU memory for training, so the browser/desktop keep enough")
     ap.add_argument("--damage", nargs="+", default=["wedge:0.8", "sphere:0.2"],
                     help="damage kinds with weights, e.g. wedge:0.8 sphere:0.2")
+    ap.add_argument("--init", choices=["seed", "target"], default="target",
+                    help="start samples from a single seed cell (grow) or from the healthy organ (repair)")
     ap.add_argument("--checkpoints", type=float, nargs="+", default=[0.08, 0.25, 0.5, 0.75, 1.0],
                     help="fractions of training at which to keep a checkpoint (for 'Watch the AI learn')")
     args = ap.parse_args()
@@ -114,7 +116,10 @@ def main():
         torch.cuda.set_per_process_memory_fraction(args.vram)
     tgt, weight, meta = load_target(args.organ, dev)
     n = meta["n"]
-    steps = args.steps or ([48, 80] if n <= 32 else [64, 104])
+    if args.init == "target":
+        steps = args.steps or [40, 72]   # repair is local: no need to cross the whole organ
+    else:
+        steps = args.steps or ([48, 80] if n <= 32 else [64, 104])
     out = ROOT / "train" / "runs" / args.organ
     out.mkdir(parents=True, exist_ok=True)
 
@@ -134,17 +139,22 @@ def main():
     kinds = tuple(d.split(":")[0] for d in args.damage)
     weights = tuple(float(d.split(":")[1]) for d in args.damage)
     keep = sorted({max(1, round(f * args.iters)) for f in args.checkpoints})
-    seed = make_seed(n, meta["seed"], device=dev)
-    pool = seed.repeat(args.pool, 1, 1, 1, 1)
+    if args.init == "target":
+        # the healthy organ exactly as the viewer shows it: alive, one-hot cell types, hidden at 0
+        seed = torch.zeros(1, CHANNELS, n, n, n, device=dev)
+        seed[0, :5] = tgt
+    else:
+        seed = make_seed(n, meta["seed"], device=dev)
+    pool = seed.cpu().repeat(args.pool, 1, 1, 1, 1)  # kept in system RAM to leave GPU memory free
     log = open(out / "log.csv", "a")
     t0 = time.time()
     for it in range(start, args.iters):
-        idx = torch.randperm(args.pool, device=dev)[: args.batch]
-        x = pool[idx].clone()
+        idx = torch.randperm(args.pool)[: args.batch]
+        x = pool[idx].to(dev)
         with torch.no_grad():
             order = per_sample_loss(x, tgt, weight).argsort(descending=True)
             x = x[order]
-            idx = idx[order]
+            idx = idx[order.cpu()]
             x[:1] = seed
             if it >= args.damage_start:
                 for j in range(1, 1 + args.n_damage):
@@ -152,13 +162,21 @@ def main():
                     if x[k, 0].max() > 0.1:
                         x[k], _ = random_damage(x[k], kinds, weights)
         k_steps = int(torch.randint(steps[0], steps[1] + 1, (1,)))
-        with torch.autocast("cuda", dtype=torch.float16, enabled=args.amp):
-            y = model(x, k_steps, use_checkpoint=args.ckpt)
-        loss_s = per_sample_loss(y.float(), tgt, weight)
-        overflow = (y - y.clamp(-3.0, 3.0)).abs().mean()
-        loss = loss_s.mean() + overflow
         opt.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward()
+        try:
+            with torch.autocast("cuda", dtype=torch.float16, enabled=args.amp):
+                y = model(x, k_steps, use_checkpoint=args.ckpt)
+            loss_s = per_sample_loss(y.float(), tgt, weight)
+            overflow = (y - y.clamp(-3.0, 3.0)).abs().mean()
+            loss = loss_s.mean() + overflow
+            scaler.scale(loss).backward()
+        except torch.OutOfMemoryError:
+            # stay within the memory cap: skip this batch rather than crash the run
+            y = loss = None
+            opt.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            print(f"it {it:5d}  skipped (out of memory at {k_steps} steps)", flush=True)
+            continue
         scaler.unscale_(opt)
         for p in model.parameters():
             if p.grad is not None:
@@ -167,7 +185,7 @@ def main():
         scaler.update()
         sched.step()
         with torch.no_grad():
-            pool[idx] = y.detach().float()
+            pool[idx] = y.detach().float().cpu()
         if it % 20 == 0:
             el = time.time() - t0
             print(f"it {it:5d}  loss {loss.item():.5f}  ovf {overflow.item():.4f}  "
@@ -176,7 +194,8 @@ def main():
             log.flush()
         if (it + 1) % args.snap_every == 0 or it == args.iters - 1:
             g, r = log_snapshot(model, seed, tgt, out, it + 1, steps[1] + 16)
-            print(f"  snapshot: grow IoU {g:.3f}   regen IoU {r:.3f}", flush=True)
+            first = "grow" if args.init == "seed" else "stable"
+            print(f"  snapshot: {first} IoU {g:.3f}   regen IoU {r:.3f}", flush=True)
             torch.save(dict(model=model.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
                             iter=it, hidden=args.hidden, organ=args.organ), out / "model.pt")
         if it + 1 in keep:

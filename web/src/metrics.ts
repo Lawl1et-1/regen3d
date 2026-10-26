@@ -119,7 +119,7 @@ export class MetricsEngine {
     const perf = this.perfusion, dist = this.dist, md = this.maxDist;
     for (let i = 0; i < sum.length; i++) {
       const d = dist[i];
-      if (d >= 0) { conn++; perf[i] = 1 + Math.min(254, Math.round((d / md) * 220)); } else perf[i] = 0;
+      if (d >= 0) { if (this.target[i] === 3) conn++; perf[i] = 1 + Math.min(254, Math.round((d / md) * 220)); } else perf[i] = 0;
     }
     const tc = this.targetCounts;
     return {

@@ -83,7 +83,8 @@ def function_score(labels: np.ndarray, target: np.ndarray, hilum) -> dict:
     return dict(
         function=float(fed / n_target_par),
         fed_of_present=float(fed / max(par.sum(), 1)),
-        connectivity=float(perf.sum() / tv),
+        # share of the original vascular tree that is present and still linked to the hilum
+        connectivity=float((perf & (target == 3)).sum() / tv),
         vessel_present=float((labels == 3).sum() / tv),
     )
 

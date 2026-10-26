@@ -3,10 +3,9 @@
     python eval/liver_results.py            # final model + every saved checkpoint
 
 Writes figures/liver/:
-  01_growth.png       the AI grows the liver from a single cell
-  02_repair.png       a swipe incision and its repair, with measured shape / function / vessels
-  03_vessels.png      X-ray of the vascular tree: healthy, cut, repaired
-  04_checkpoints.png  the same incision repaired by the model at each training stage
+  01_repair.png       a swipe incision and its repair, with measured shape / function / vessels
+  02_vessels.png      X-ray of the vascular tree: healthy, cut, repaired
+  03_checkpoints.png  the same incision repaired by the model at each training stage
   results.json        all the numbers shown on the images
 """
 from __future__ import annotations
@@ -26,11 +25,11 @@ sys.path.insert(0, str(ROOT / "eval"))
 
 from damage import wedge_region  # noqa: E402
 from metrics import all_metrics, classify  # noqa: E402
-from nca import NCA3D, make_seed  # noqa: E402
+from nca import CHANNELS, NCA3D  # noqa: E402
 from render3d import _dev, render  # noqa: E402
 
 OUT = ROOT / "figures" / "liver"
-GROW = 180
+SETTLE = 60   # steps the AI runs on the healthy organ before the cut
 REPAIR = 300
 TEXT = (231, 236, 243)
 MUTED = (139, 149, 166)
@@ -76,18 +75,14 @@ def swipe_lesion(labels: np.ndarray, depth_frac=0.6, w0=2.2) -> np.ndarray:
 
 
 @torch.no_grad()
-def run(model, seed, mask_np, dev, frames_at=(), grow_frames=()):
+def run(model, start, mask_np, dev, frames_at=()):
+    """Healthy organ -> AI runs a while -> swipe incision -> AI repairs."""
     torch.manual_seed(0)
-    x = seed.clone()
-    growth = []
-    for k in range(GROW + 1):
-        if k in grow_frames:
-            growth.append((k, x[0].cpu()))
-        if k < GROW:
-            x = model.step(x)
+    x = start.clone()
+    for _ in range(SETTLE):
+        x = model.step(x)
     healthy = x[0].cpu()
-    mask = torch.from_numpy(mask_np).to(dev)
-    y = x * (~mask).float()
+    y = x * (~torch.from_numpy(mask_np).to(dev)).float()
     cut = y[0].cpu()
     seq = []
     for k in range(REPAIR + 1):
@@ -95,7 +90,7 @@ def run(model, seed, mask_np, dev, frames_at=(), grow_frames=()):
             seq.append((k, y[0].cpu()))
         if k < REPAIR:
             y = model.step(y)
-    return healthy, cut, seq, growth
+    return healthy, cut, seq
 
 
 def wound_of(cut_state: torch.Tensor, mask: np.ndarray) -> torch.Tensor:
@@ -143,7 +138,7 @@ def main():
     target = np.load(ROOT / "targets" / "data" / "liver.npy")
     meta = json.loads((ROOT / "targets" / "data" / "liver.json").read_text())
     hil = meta["hilum"]
-    seed = make_seed(meta["n"], meta["seed"], device=dev)
+    n = meta["n"]
     mask = swipe_lesion(target)
     OUT.mkdir(parents=True, exist_ok=True)
     results = {"lesion_voxels": int((mask & (target > 0)).sum()),
@@ -151,22 +146,16 @@ def main():
 
     # ---------------------------------------------------------------- final model
     model, it = load_model(run_dir / "model.pt", dev)
-    times = (0, 10, 25, 50, 100, 200, 300)
-    gsteps = (0, 15, 30, 60, 120, 180)
-    healthy, cut, seq, growth = run(model, seed, mask, dev, times, gsteps)
-    m_h = all_metrics(healthy.numpy(), target, hil, surface=True)
-    m_c = all_metrics(cut.numpy(), target, hil)
-    results["final"] = dict(iteration=it, healthy=m_h, lesion=m_c, repair={})
-
-    tgt_state = torch.zeros(16, *target.shape)
+    tgt_state = torch.zeros(CHANNELS, n, n, n)
     tgt_state[0] = torch.from_numpy(target > 0).float()
     for t in range(1, 5):
         tgt_state[t] = torch.from_numpy(target == t).float()
-    g_panels = [panel(render(s), f"step {k}", ["grown from 1 cell" if k == 0 else ""]) for k, s in growth]
-    g_panels.append(panel(render(tgt_state), "target", ["the shape it was trained on"], accent=CYAN))
-    sheet(g_panels, "The AI grows a liver from a single cell",
-          f"Every cell runs the same small neural network and only sees its neighbours.  Model after {it} training iterations.",
-          cols=7).save(OUT / "01_growth.png")
+    start = tgt_state[None].to(dev)  # the healthy organ, exactly as the viewer starts it
+    times = (0, 10, 25, 50, 100, 200, 300)
+    healthy, cut, seq = run(model, start, mask, dev, times)
+    m_h = all_metrics(healthy.numpy(), target, hil, surface=True)
+    m_c = all_metrics(cut.numpy(), target, hil)
+    results["final"] = dict(iteration=it, healthy=m_h, lesion=m_c, repair={})
 
     wnd = wound_of(cut, mask)
     r_panels = [panel(render(healthy), "healthy", fmt(m_h)),
@@ -175,32 +164,32 @@ def main():
         m = all_metrics(s.numpy(), target, hil)
         results["final"]["repair"][k] = m
         regrown = torch.from_numpy(mask) & (s[0] > 0.1)
-        r_panels.append(panel(render(s, regrown=regrown, wound=wnd * 0 > 0), f"+{k} steps", fmt(m), accent=CYAN if k == times[-1] else None))
+        r_panels.append(panel(render(s, regrown=regrown), f"+{k} steps", fmt(m), accent=CYAN if k == times[-1] else None))
     sheet(r_panels, "The AI repairs a swipe incision",
           "No repair rule is written anywhere: the same network learned it from thousands of random cuts.  Regrown tissue tinted cyan.",
-          cols=4).save(OUT / "02_repair.png")
+          cols=4).save(OUT / "01_repair.png")
 
     final = seq[-1][1]
     v_panels = [panel(render(healthy, mode="xray"), "healthy vessels", [f"linked to hilum {m_h['connectivity'] * 100:.1f}%"]),
                 panel(render(cut, mode="xray"), "after the incision", [f"linked to hilum {m_c['connectivity'] * 100:.1f}%"]),
                 panel(render(final, mode="xray"), f"after {REPAIR} steps", [f"linked to hilum {results['final']['repair'][REPAIR]['connectivity'] * 100:.1f}%"], accent=CYAN)]
-    sheet(v_panels, "Vessels reconnect", "X-ray view: portal tree (red) and hepatic veins (blue).").save(OUT / "03_vessels.png")
+    sheet(v_panels, "Vessels reconnect", "X-ray view: portal tree (red) and hepatic veins (blue).").save(OUT / "02_vessels.png")
 
     # ---------------------------------------------------------------- checkpoints
     rows = []
     results["checkpoints"] = []
     for ck in sorted(run_dir.glob("ckpt_*.pt")):
         mdl, it_c = load_model(ck, dev)
-        h_c, c_c, s_c, _ = run(mdl, seed, mask, dev, (REPAIR,))
+        h_c, c_c, s_c = run(mdl, start, mask, dev, (REPAIR,))
         mh, mr = all_metrics(h_c.numpy(), target, hil), all_metrics(s_c[-1][1].numpy(), target, hil)
         results["checkpoints"].append(dict(iteration=it_c, healthy=mh, repaired=mr))
         regrown = torch.from_numpy(mask) & (s_c[-1][1][0] > 0.1)
-        rows += [panel(render(h_c), f"iteration {it_c}: grown", fmt(mh)),
+        rows += [panel(render(h_c), f"iteration {it_c}: healthy", fmt(mh)),
                  panel(render(c_c, wound=wound_of(c_c, mask)), "same incision", []),
                  panel(render(s_c[-1][1], regrown=regrown), f"after {REPAIR} steps", fmt(mr), accent=CYAN)]
     if rows:
         sheet(rows, "Watch the AI learn", "The same incision, repaired by the model saved at each stage of training.",
-              cols=3).save(OUT / "04_checkpoints.png")
+              cols=3).save(OUT / "03_checkpoints.png")
     (OUT / "results.json").write_text(json.dumps(results, indent=1))
     print(json.dumps({k: v for k, v in results.items() if k != "final"}, indent=1)[:2000])
     print("final repair", {k: round(v["iou"], 3) for k, v in results["final"]["repair"].items()})
