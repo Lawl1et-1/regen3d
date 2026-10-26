@@ -1,0 +1,29 @@
+{
+  "name": "lung",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    21,
+    20,
+    23
+  ],
+  "hilum": [
+    32,
+    25,
+    24
+  ],
+  "counts": {
+    "empty": 96130,
+    "capsule": 2874,
+    "parenchyma": 8846,
+    "vessel": 2032,
+    "drain": 710
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ]
+}

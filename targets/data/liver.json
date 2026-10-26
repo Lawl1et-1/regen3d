@@ -1,0 +1,29 @@
+{
+  "name": "liver",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    23,
+    25,
+    25
+  ],
+  "hilum": [
+    25,
+    14,
+    25
+  ],
+  "counts": {
+    "empty": 100520,
+    "capsule": 2143,
+    "parenchyma": 6113,
+    "vessel": 1485,
+    "drain": 331
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ]
+}

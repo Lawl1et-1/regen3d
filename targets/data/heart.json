@@ -1,0 +1,29 @@
+{
+  "name": "heart",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    21,
+    25,
+    20
+  ],
+  "hilum": [
+    24,
+    36,
+    24
+  ],
+  "counts": {
+    "empty": 103331,
+    "capsule": 1943,
+    "parenchyma": 3428,
+    "vessel": 1285,
+    "drain": 605
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ]
+}

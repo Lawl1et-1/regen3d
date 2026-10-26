@@ -1,0 +1,25 @@
+{
+  "name": "blob",
+  "n": 32,
+  "channels": 16,
+  "seed": [
+    16,
+    16,
+    15
+  ],
+  "hilum": null,
+  "counts": {
+    "empty": 28322,
+    "capsule": 0,
+    "parenchyma": 4446,
+    "vessel": 0,
+    "drain": 0
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ]
+}

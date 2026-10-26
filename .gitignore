@@ -1,0 +1,6 @@
+.venv/
+node_modules/
+web/dist/
+train/runs/
+__pycache__/
+*.pyc

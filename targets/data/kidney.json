@@ -1,0 +1,29 @@
+{
+  "name": "kidney",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    22,
+    23,
+    25
+  ],
+  "hilum": [
+    31,
+    24,
+    24
+  ],
+  "counts": {
+    "empty": 103341,
+    "capsule": 1534,
+    "parenchyma": 4288,
+    "vessel": 947,
+    "drain": 482
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ]
+}
