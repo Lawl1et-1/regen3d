@@ -8,13 +8,17 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
-export type OrganId = 'liver' | 'heart' | 'kidney' | 'lung';
+export type OrganId = 'liver' | 'heart' | 'kidney' | 'lung' | 'stomach' | 'spleen' | 'pancreas' | 'brain';
 
 export const ORGANS: Record<OrganId, { label: string; nodes: string[]; color: [number, number, number]; glow: [number, number, number] }> = {
   liver: { label: 'Liver', nodes: ['liver'], color: [0.40, 0.10, 0.08], glow: [1.0, 0.42, 0.25] },
   heart: { label: 'Heart', nodes: ['heart'], color: [0.62, 0.10, 0.12], glow: [1.0, 0.18, 0.25] },
   kidney: { label: 'Kidneys', nodes: ['kidney_left', 'kidney_right'], color: [0.48, 0.14, 0.14], glow: [1.0, 0.55, 0.3] },
   lung: { label: 'Lungs', nodes: ['lung_left', 'lung_right'], color: [0.80, 0.50, 0.52], glow: [0.55, 0.75, 1.0] },
+  stomach: { label: 'Stomach', nodes: ['stomach'], color: [0.66, 0.36, 0.34], glow: [1.0, 0.6, 0.45] },
+  spleen: { label: 'Spleen', nodes: ['spleen'], color: [0.42, 0.10, 0.18], glow: [0.9, 0.3, 0.55] },
+  pancreas: { label: 'Pancreas', nodes: ['pancreas'], color: [0.78, 0.60, 0.46], glow: [1.0, 0.8, 0.45] },
+  brain: { label: 'Brain', nodes: ['brain'], color: [0.78, 0.58, 0.58], glow: [0.75, 0.6, 1.0] },
 };
 
 const skinVert = /* glsl */ `

@@ -67,7 +67,8 @@ def export_target(organ: str, meta: dict):
     print("exported target only", organ)
 
 
-LABELS = {"blob": "Blob", "liver": "Liver", "kidney": "Kidney", "heart": "Heart", "lung": "Lung"}
+LABELS = {"blob": "Blob", "liver": "Liver", "kidney": "Kidney", "heart": "Heart", "lung": "Lung",
+          "stomach": "Stomach", "spleen": "Spleen", "pancreas": "Pancreas", "brain": "Brain"}
 
 
 def write_index():

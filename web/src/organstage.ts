@@ -26,6 +26,10 @@ const TISSUE: Record<string, [number, number, number, number]> = {
   heart: [0.44, 0.06, 0.07, 1],
   kidney: [0.40, 0.10, 0.085, 1],
   lung: [0.62, 0.34, 0.36, 1],
+  stomach: [0.55, 0.22, 0.20, 1],
+  spleen: [0.34, 0.06, 0.12, 1],
+  pancreas: [0.62, 0.40, 0.28, 1],
+  brain: [0.66, 0.46, 0.45, 1],
 };
 
 export class OrganStage {

@@ -23,6 +23,10 @@ const MODELS: Record<OrganId, { model: string; mesh: string }> = {
   heart: { model: 'heart', mesh: 'heart' },
   kidney: { model: 'kidney', mesh: 'kidney_left' },
   lung: { model: 'lung', mesh: 'lung_right' },
+  stomach: { model: 'stomach', mesh: 'stomach' },
+  spleen: { model: 'spleen', mesh: 'spleen' },
+  pancreas: { model: 'pancreas', mesh: 'pancreas' },
+  brain: { model: 'brain', mesh: 'brain' },
 };
 /** Organs whose AI is trained and exported (organs/index.json). */
 let CUTTABLE: OrganId[] = [];
