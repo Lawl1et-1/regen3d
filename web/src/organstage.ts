@@ -8,11 +8,16 @@ import { Renderer, type CamLike, type FrameOpts } from './renderer';
 import { Scene } from './scene';
 import { Diagnosis, liveStepsPerSec, type DiagnosisResult } from './diagnosis';
 import { RepairTracker, type RepairOutcome, type RepairState } from './repair';
-import { Simulation, TOOL_WEDGE } from './sim';
+import { asSummary, holeFillFrames } from './baseline';
+import type { Metrics } from './metrics';
+import { loadCheckpoint, SimKernels, Simulation, TOOL_WEDGE, type ToolOp, type Weights } from './sim';
 import { raycastTissue } from './tissue';
 
 interface TrailPt { x: number; y: number; t: number }
 export interface CutInfo { depthMm: number; lengthMm: number }
+export interface LearnRow { iteration: number; metrics: Metrics | null; step: number; done: boolean }
+export interface LearnProgress { rows: LearnRow[]; current: number; finished: boolean }
+const LEARN_STEPS = 100;
 
 export class OrganStage {
   scene!: Scene;
@@ -48,6 +53,20 @@ export class OrganStage {
   onRepair?: (s: RepairState) => void;
   onRepairDone?: (o: RepairOutcome, forecast: DiagnosisResult) => void;
   onPlan?: () => void;
+  /** which volume(s) are shown: the live organ, AI vs hole filling side by side, or a training checkpoint */
+  view: 'live' | 'compare' | 'learn' = 'live';
+  private cutOps: ToolOp[] = [];
+  private lastResult: DiagnosisResult | null = null;
+  private baseSim: Simulation | null = null;
+  private learnKernels: SimKernels | null = null;
+  private learnSim: Simulation | null = null;
+  private ckptCache = new Map<number, Weights>();
+  private viewToken = 0;
+  private target: V3 = [0, 0, 0];
+  private pieceWorld: M4 = mat4();
+  private mainWorld: M4 = mat4();
+  onCompare?: (c: { ai: Metrics; base: Metrics; frame: number; frames: number }) => void;
+  onLearn?: (l: LearnProgress) => void;
   tissue: [number, number, number, number] = [0.36, 0.085, 0.065, 1];
 
   private constructor(readonly canvas: HTMLCanvasElement, readonly overlay: CanvasRenderingContext2D) {}
@@ -103,6 +122,9 @@ export class OrganStage {
     sim.uploadAux(null);
     this.diag = [0, 0];
     this.stopRepair();
+    this.exitViews();
+    this.cutOps = [];
+    this.lastResult = null;
     this.healthy = null;
     this.lesioned = false;
     this.diagPending = false;
@@ -114,6 +136,7 @@ export class OrganStage {
 
   /** Show the diagnosis overlay; when repairable, preview the plan then repair live. */
   showDiagnosis(r: DiagnosisResult) {
+    this.lastResult = r;
     this.scene.sim.uploadAux(r.aux);
     this.diag = r.repairable ? [1, 0] : [0.6, 1];
     this.lastVP.fill(NaN);
@@ -131,6 +154,98 @@ export class OrganStage {
     this.ghost = 0;
   }
 
+  /** A lesion has been analysed and (if repairable) repaired: the comparisons can run. */
+  get canCompare() { return !!this.lastResult && (this.mode === 'done' || !this.lastResult.repairable); }
+
+  /** "Without AI": the AI's repair beside a non-learned hole filling of the same lesion. */
+  async startCompare() {
+    const r = this.lastResult;
+    if (!r) return;
+    const token = ++this.viewToken;
+    this.view = 'compare';
+    this.baseSim ??= new Simulation(this.scene.kernels, 'baseline');
+    const frames = holeFillFrames(r.postCut, this.scene.n);
+    const ai = this.scene.latest!;
+    for (let f = 0; f < frames.length; f++) {
+      this.baseSim.setFromLabels(frames[f]);
+      const enc = this.device.createCommandEncoder();
+      this.baseSim.encodePack(enc);
+      this.device.queue.submit([enc.finish()]);
+      const base = this.scene.metrics.compute(asSummary(frames[f]));
+      this.onCompare?.({ ai, base, frame: f, frames: frames.length });
+      await new Promise((res) => setTimeout(res, f === 0 ? 700 : 160));
+      if (token !== this.viewToken) return;
+    }
+  }
+
+  /** "Watch the AI learn": the same cut, repaired by the model saved at each stage of training. */
+  async startLearn() {
+    const its = this.scene.organ.meta.checkpoints ?? [];
+    if (!its.length || !this.cutOps.length) return;
+    const token = ++this.viewToken;
+    this.view = 'learn';
+    this.learnKernels ??= new SimKernels(this.device, this.scene.organ);
+    this.learnSim ??= new Simulation(this.learnKernels, 'learn');
+    const sim = this.learnSim;
+    const rows: LearnRow[] = its.map((iteration) => ({ iteration, metrics: null, step: 0, done: false }));
+    const emit = (current: number, finished = false) => this.onLearn?.({ rows, current, finished });
+    for (let k = 0; k < its.length; k++) {
+      let w = this.ckptCache.get(its[k]);
+      if (!w) { w = await loadCheckpoint(this.scene.organ.meta.name, its[k]); this.ckptCache.set(its[k], w); }
+      if (token !== this.viewToken) return;
+      this.learnKernels.loadWeights(w);
+      // same starting point as the live organ: healthy, settled by this model, then the same cuts
+      sim.setFromLabels(this.scene.organ.labels);
+      sim.setStepIndex(0);
+      sim.writeParams(1234);
+      let enc = this.device.createCommandEncoder();
+      sim.encodeSteps(enc, 60);
+      this.device.queue.submit([enc.finish()]);
+      for (const op of this.cutOps) sim.queueTool(op);
+      sim.encodeTools();
+      for (let step = 0; step <= LEARN_STEPS; step += 2) {
+        enc = this.device.createCommandEncoder();
+        if (step > 0) sim.encodeSteps(enc, 2);
+        sim.encodePack(enc);
+        const read = step % 10 === 0 ? sim.readSummary(enc) : null;
+        this.device.queue.submit([enc.finish()]);
+        await this.device.queue.onSubmittedWorkDone();
+        if (read) {
+          const sum = await read();
+          rows[k].metrics = this.scene.metrics.compute(sum);
+          rows[k].step = step;
+        }
+        if (token !== this.viewToken) return;
+        emit(k);
+        await new Promise((res) => requestAnimationFrame(() => res(null)));
+        if (token !== this.viewToken) return;
+      }
+      rows[k].done = true;
+      emit(k);
+      await new Promise((res) => setTimeout(res, 900));
+      if (token !== this.viewToken) return;
+    }
+    emit(its.length - 1, true);
+  }
+
+  /** Screen position of the left (AI) or right (hole filling) organ in the comparison. */
+  screenOf(which: 'main' | 'piece'): [number, number] {
+    const w = which === 'main' ? this.mainWorld : this.pieceWorld;
+    const m = this.cam.viewProj;
+    const top = (this.scene.organ.meta.world?.half ?? 0.13) * 0.85;
+    const p: V3 = [w[12], w[13] + top, w[14]];
+    const cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    const x = (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw;
+    const y = (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw;
+    return [(x * 0.5 + 0.5) * innerWidth, (0.5 - y * 0.5) * innerHeight];
+  }
+
+  exitViews() {
+    this.viewToken++;
+    this.view = 'live';
+    this.lastVP.fill(NaN);
+  }
+
   setBrain(on: boolean) { this.brain = on; this.lastVP.fill(NaN); }
 
   syncCamera(c: THREE.PerspectiveCamera, target: THREE.Vector3) {
@@ -142,6 +257,7 @@ export class OrganStage {
     this.cam.invViewProj = invert(vp);
     this.cam.eye = [c.position.x, c.position.y, c.position.z];
     this.cam.dist = c.position.distanceTo(target);
+    this.target = [target.x, target.y, target.z];
   }
 
   // ------------------------------------------------------------------ swipe
@@ -227,13 +343,15 @@ export class OrganStage {
     const frac = Math.min(0.85, 0.22 + speed * 0.35);
     const depth = Math.max(2.5, thick * frac);
     const w0 = 2.2;
-    this.scene.sim.queueTool({
+    const op: ToolOp = {
       kind: TOOL_WEDGE,
       p0: [e[0], e[1], e[2], depth],
       p1: [nrm[0], nrm[1], nrm[2], w0],
       p3: [vDir[0], vDir[1], vDir[2], s0],
       p4: [uDir[0], uDir[1], uDir[2], s1],
-    });
+    };
+    this.scene.sim.queueTool(op);
+    this.cutOps.push(op);
     this.cutAge = 0;
     this.flash = 0.35;
     this.lesioned = true;
@@ -289,7 +407,7 @@ export class OrganStage {
     const simChanged = this.needPack || sc.sim.pendingTools > 0 || steps > 0;
     const vp = this.cam.viewProj;
     const camChanged = vp.some((v, i) => v !== this.lastVP[i]);
-    const animating = this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
+    const animating = this.view !== 'live' || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
     if (simChanged || camChanged || animating || this.needRead) {
       const enc = this.device.createCommandEncoder();
       let read = null;
@@ -308,11 +426,31 @@ export class OrganStage {
         clip: { on: false, n: [0, 0, 1], d: 0 }, flash: this.flash * 0.25, exposure: 1.0,
         growthRate: 0, debrisRate: 0, sparks: { a: [0, 0, 0], b: [0, 0, 0], on: false }, pieceVel: [0, 0, 0],
       };
+      // side by side: the AI's repair on the left, hole filling on the right
+      let mainWorld = this.toWorld;
+      let piece = null;
+      if (this.view === 'compare' && this.baseSim) {
+        const e = this.cam.eye, t = this.target;
+        const f = v3.norm(v3.sub(t, e));
+        const right = v3.norm(v3.cross(f, [0, 1, 0]));
+        const dx = (this.scene.organ.meta.world?.half ?? 0.13) * 1.12;
+        this.mainWorld.set(this.toWorld); this.pieceWorld.set(this.toWorld);
+        const up = v3.norm(v3.cross(right, f));   // lift both organs above the results bar
+        for (let k = 0; k < 3; k++) {
+          this.mainWorld[12 + k] += -right[k] * dx + up[k] * dx * 0.45;
+          this.pieceWorld[12 + k] += right[k] * dx + up[k] * dx * 0.45;
+        }
+        mainWorld = this.mainWorld;
+        piece = { sim: this.baseSim, toWorld: this.pieceWorld, tissue: this.tissue };
+      }
+      const shown = this.view === 'learn' && this.learnSim ? this.learnSim : sc.sim;
+      const live = this.view === 'live';
       this.renderer.render(enc, this.cam, {
-        sim: sc.sim, toWorld: this.toWorld, tissue: this.tissue, diag: this.mode === 'idle' ? this.diag : this.mode === 'done' ? [0, 0] : [this.diag[0] * (1 - this.ghost), this.diag[1]],
-      ghostAmt: this.ghost, ghostTint: [0.35, 0.62, 1.0, 1],
-        cuts: this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
-      }, null, opts, dt);
+        sim: shown, toWorld: mainWorld, tissue: this.tissue,
+        diag: !live ? [0, 0] : this.mode === 'idle' ? this.diag : this.mode === 'done' ? [0, 0] : [this.diag[0] * (1 - this.ghost), this.diag[1]],
+        ghostAmt: live ? this.ghost : 0, ghostTint: [0.35, 0.62, 1.0, 1],
+        cuts: live && this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
+      }, piece, opts, dt);
       this.device.queue.submit([enc.finish()]);
       const wasLesioned = this.lesioned;
       const tracker = this.mode === 'repair' ? this.tracker : null;

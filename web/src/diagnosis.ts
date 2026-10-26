@@ -38,6 +38,8 @@ export interface DiagnosisResult {
   /** voxels removed by the lesion, and the part of it open to the outside (the wound mouth) */
   lesion: Uint8Array;
   mouth: Uint8Array;
+  /** class grid right after the cut (the starting point of every repair) */
+  postCut: Uint32Array;
 }
 
 export interface Progress { done: number; running: boolean; rollouts: RolloutResult[] }
@@ -68,6 +70,7 @@ export class Diagnosis {
     const alive = new Float32Array(nv);     // how many rollouts end with tissue here
     const vessel = new Float32Array(nv);    // ...with a perfused vessel here
     let lesion: Uint8Array | null = null;
+    let postCut: Uint32Array | null = null;
     let lesionCount = 0;
     let steps = 6;                          // GPU work per chunk, adapted to keep frames light
 
@@ -95,6 +98,7 @@ export class Diagnosis {
           lastSum = sum;
           curve.push({ step: s, iou: last.iou });
           if (k === 0 && s === 0) {
+            postCut = sum;
             lesion = new Uint8Array(nv);
             for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) { lesion[i] = 1; lesionCount++; }
           }
@@ -193,7 +197,7 @@ export class Diagnosis {
     for (let i = 0; i < nv; i++) if (les[i] && nearOut[i]) mouth[i] = 1;
 
     this.result = {
-      lesion: les, mouth,
+      lesion: les, mouth, postCut: postCut ?? healthy,
       repairable, probability, confidence: repairable ? probability : 1 - probability,
       predictedSteps, shape, vessels, lesionShare: lesionCount / Math.max(1, this.metrics.targetCounts.slice(1).reduce((a, b) => a + b, 0)),
       rollouts: R, reasons, aux,

@@ -14,7 +14,10 @@ export class AnalysisPanel {
     parent.appendChild(this.el);
   }
 
-  hide() { this.el.classList.remove('show'); }
+  hide() { this.wasShown = this.el.classList.contains('show') || this.wasShown; this.el.classList.remove('show'); }
+  private wasShown = false;
+  /** Show the panel again after a comparison view, if it had content. */
+  restore() { if (this.wasShown && this.el.innerHTML) this.el.classList.add('show'); this.wasShown = false; }
 
   /** The hologram is showing the predicted repair; the live repair follows. */
   plan() {

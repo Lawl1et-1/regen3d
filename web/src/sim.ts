@@ -27,6 +27,8 @@ export interface OrganMeta {
   world?: { center: [number, number, number]; half: number };
   /** hidden channels that carry the wound signal (shown by the AI Brain view) */
   brain_channels?: [number, number, number];
+  /** training iterations of the saved checkpoints (organs/<name>.ckpt_<it>.json) */
+  checkpoints?: number[];
 }
 
 export interface Organ {
@@ -63,6 +65,21 @@ export class SimKernels {
   readonly toxPipe: GPUComputePipeline;
   readonly packPipe: GPUComputePipeline;
 
+  /** w2 is (C, hidden) row-major; the shader wants (hidden, C) so each hidden unit adds 4 vec4 */
+  static transposeW2(w2: number[], hidden: number) {
+    const t = new Float32Array(hidden * CH);
+    for (let c = 0; c < CH; c++) for (let h = 0; h < hidden; h++) t[h * CH + c] = w2[c * hidden + h];
+    return t;
+  }
+
+  /** Swap in other weights of the same shape (a training checkpoint). */
+  loadWeights(w: Weights) {
+    const q = this.device.queue;
+    q.writeBuffer(this.w1, 0, new Float32Array(w.w1));
+    q.writeBuffer(this.b1, 0, new Float32Array(w.b1));
+    q.writeBuffer(this.w2t, 0, SimKernels.transposeW2(w.w2, this.hidden));
+  }
+
   constructor(readonly device: GPUDevice, readonly organ: Organ) {
     const m = organ.meta;
     this.n = m.n;
@@ -74,10 +91,7 @@ export class SimKernels {
     };
     this.w1 = mk(new Float32Array(m.w1));
     this.b1 = mk(new Float32Array(m.b1));
-    // w2 is (C, hidden) row-major; the shader wants (hidden, C) so each hidden unit adds 4 vec4
-    const w2t = new Float32Array(m.hidden * CH);
-    for (let c = 0; c < CH; c++) for (let h = 0; h < m.hidden; h++) w2t[h * CH + c] = m.w2[c * m.hidden + h];
-    this.w2t = mk(w2t);
+    this.w2t = mk(SimKernels.transposeW2(m.w2, m.hidden));
 
     const mod = (code: string, label: string) => device.createShaderModule({ code, label });
     this.stepPipe = device.createComputePipeline({
@@ -105,6 +119,14 @@ export class SimKernels {
       layout: 'auto', compute: { module: mod(packSrc, 'pack'), entryPoint: 'pack' },
     });
   }
+}
+
+export interface Weights { w1: number[]; b1: number[]; w2: number[] }
+
+export async function loadCheckpoint(organ: string, iteration: number): Promise<Weights & { iteration: number }> {
+  const r = await fetch(`${import.meta.env.BASE_URL}organs/${organ}.ckpt_${String(iteration).padStart(5, '0')}.json`);
+  if (!r.ok) throw new Error(`missing checkpoint ${iteration}`);
+  return r.json();
 }
 
 export interface ToolOp {

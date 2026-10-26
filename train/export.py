@@ -36,6 +36,19 @@ def export(organ: str):
         b1=[round(float(v), 6) for v in b1.ravel()],
         w2=[round(float(v), 6) for v in w2.ravel()],
     )
+    # training checkpoints for "Watch the AI learn": weights only, one small file each
+    ckpts = []
+    for cp in sorted((ROOT / "train" / "runs" / organ).glob("ckpt_*.pt")):
+        c = torch.load(cp, map_location="cpu")["model"]
+        it = int(cp.stem.split("_")[1])
+        ckpts.append(it)
+        (out / f"{organ}.ckpt_{it:05d}.json").write_text(json.dumps(dict(
+            iteration=it,
+            w1=[round(float(v), 6) for v in c["w1.weight"].reshape(c["w1.weight"].shape[0], -1).numpy().ravel()],
+            b1=[round(float(v), 6) for v in c["w1.bias"].numpy().ravel()],
+            w2=[round(float(v), 6) for v in c["w2.weight"].reshape(c["w2.weight"].shape[0], -1).numpy().ravel()],
+        )))
+    meta["checkpoints"] = ckpts
     brain = ROOT / "targets" / "data" / f"{organ}_brain.json"
     if brain.exists():
         meta.update(json.loads(brain.read_text()))
@@ -61,7 +74,7 @@ def write_index():
     out = ROOT / "web" / "public" / "organs"
     items = []
     for p in sorted(out.glob("*.json")):
-        if p.stem == "index":
+        if p.stem == "index" or ".ckpt_" in p.name:
             continue
         m = json.loads(p.read_text())
         items.append(dict(name=p.stem, label=LABELS.get(p.stem, p.stem.title()), n=m["n"]))

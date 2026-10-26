@@ -234,6 +234,14 @@ export class BodyView3D {
 
   get tweening() { return !!this.tween; }
 
+  /** Move the camera closer (f < 1) or further (f > 1) from its target, smoothly. */
+  zoomBy(f: number) {
+    const t = this.controls.target.clone();
+    const pos = this.camera.position.clone().sub(t).multiplyScalar(f).add(t);
+    this.controls.maxDistance = Math.max(this.controls.maxDistance, pos.distanceTo(t) * 1.3);
+    this.startTween(pos, t, 0.9);
+  }
+
   set renderOn(on: boolean) { this.renderEnabled = on; this.dirty = true; }
 
   /** Left drag cuts (handled outside), right drag rotates; one finger cuts, two fingers rotate/zoom. */
