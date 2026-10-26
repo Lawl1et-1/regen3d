@@ -266,7 +266,9 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
     if (dissolve > 0.0) {
       dens *= smoothstep(dissolve - 0.05, dissolve + 0.05, vnoise(p * 9.0));
     }
-    let gh = select(vec4f(0.0), G0(p), ghostAmt > 0.001 || u.flags.y > 0.5);
+    // forecast from the AI diagnosis: b = predicted tissue, a = predicted vessels (mean of the rollouts)
+    let axs = textureSampleLevel(taux, smp, p * 0.5 + 0.5, 0.0);
+    let gh = vec4f(axs.b, 0.0, 0.0, axs.a);
 
     if (first && histoStart) {
       first = false;
@@ -345,11 +347,15 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
              + wn.w * vec3f(0.25, 0.45, 1.6) * 1.4
              + (wn.x + wn.y) * vec3f(0.12, 0.2, 0.32) * (0.15 + edge * 1.5) * 4.0;
       } else if (mode < 3.5) {
-        // ---------------- hidden channel explorer
-        let h = tanh(s1.y * u.params.x);
-        sigma = 6.0 * dens + abs(h) * 22.0 * dens;
-        albedo = vec3f(0.06) * (0.4 + 0.6 * max(dot(N, L), 0.0));
-        emit = diverging(h) * abs(h) * 2.2;
+        // ---------------- AI Brain: the hidden signals cells exchange, brightest where they change
+        let hb = S2(p).yzw;                         // three hidden channels (tanh), chosen for the wound signal
+        let act = smoothstep(0.01, 0.25, s1.w);     // how fast the hidden state is changing
+        let c3 = vec3f(0.15, 0.65, 1.0) * max(hb.x, 0.0) + vec3f(1.0, 0.25, 0.75) * max(-hb.x, 0.0)
+               + vec3f(1.0, 0.72, 0.18) * abs(hb.y) + vec3f(0.35, 1.0, 0.6) * abs(hb.z) * 0.8;
+        let edge = pow(1.0 - abs(dot(N, V)), 2.0);
+        sigma = (3.0 + 14.0 * act) * dens;
+        albedo = vec3f(0.0);
+        emit = c3 * (0.1 + 1.3 * act) + vec3f(0.10, 0.16, 0.26) * edge * 0.8;
       } else if (mode < 4.5) {
         // ---------------- nutrient field
         let nu = s1.z;
@@ -420,22 +426,24 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
     // forecast hologram: shell + scanlines where tissue is still missing
     if (ghostAmt > 0.001) {
       let missing = 1.0 - smoothstep(0.15, 0.45, s0.x);
-      let shell = exp(-pow((gh.x - 0.42) / 0.11, 2.0)) * missing;
+      let shell = exp(-pow((gh.x - 0.5) / 0.12, 2.0)) * missing;
       let wp = (u.localToWorld * vec4f(p, 1.0)).xyz;
       let scan = 0.45 + 0.55 * smoothstep(0.35, 0.6, fract(wp.y * 42.0 - time * 1.4));
       let shimmer = 0.75 + 0.25 * vnoise(vec3f(p * 14.0 + time * 2.0));
       let tint = mix(CYAN, u.focus.xyz, u.focus.w);
-      var gem = tint * (shell * 1.5 + smoothstep(0.3, 0.6, gh.x) * missing * 0.08) * scan * shimmer;
-      // vessel plan: forecast vessels not yet present, drawn as travelling dots
-      let vp = smoothstep(0.3, 0.55, gh.w) * (1.0 - smoothstep(0.15, 0.45, s0.w)) * smoothstep(0.2, 0.5, gh.x);
-      let dots = smoothstep(0.62, 0.85, 0.5 + 0.5 * sin(dot(p, vec3f(1.0, 0.8, 0.6)) * n * 0.75 - time * 7.0));
-      gem += mix(vec3f(0.7, 1.0, 1.0), tint, 0.3) * vp * dots * 3.0;
-      col += T * gem * ghostAmt * dt * 22.0;
+      var gem = tint * (shell * 3.0 + smoothstep(0.3, 0.6, gh.x) * missing * 0.15) * scan * shimmer;
+      // vessel plan: small glowing dots along the vessels the forecast regrows, blinking in sequence
+      let vp = smoothstep(0.55, 0.8, gh.w) * (1.0 - smoothstep(0.15, 0.45, s0.w));
+      let q = p * n * 0.5 / 1.6;
+      let dotm = 1.0 - smoothstep(0.1, 0.2, length(fract(q) - 0.5));
+      let blink = 0.5 + 0.5 * sin(time * 5.0 - dot(floor(q), vec3f(0.9, 0.7, 0.5)));
+      gem += vec3f(0.75, 0.95, 1.0) * vp * dotm * (0.35 + 0.65 * blink) * 5.0;
+      col += T * gem * ghostAmt * dt * 5.0;
     }
 
     // AI diagnosis: orange where the simulated repairs disagree, red where tissue never comes back
     if (u.diag.x + u.diag.y > 0.001) {
-      let ax = textureSampleLevel(taux, smp, p * 0.5 + 0.5, 0.0);
+      let ax = axs;
       let unc = smoothstep(0.35, 0.95, ax.r);  // only clear disagreement glows
       col += T * (vec3f(1.0, 0.38, 0.04) * unc * u.diag.x * 7.0 + vec3f(0.9, 0.03, 0.06) * smoothstep(0.2, 0.8, ax.g) * u.diag.y * 3.5) * dt;
     }

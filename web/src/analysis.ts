@@ -1,6 +1,7 @@
 // "AI Analysis" panel: shows the diagnosis while the rollouts run, then the verdict
 // with the measured repair probability, predicted time, shape and vessel recovery.
-import { LIVE_STEPS_PER_SEC, ROLLOUTS, ROLLOUT_STEPS, type DiagnosisResult, type Progress } from './diagnosis';
+import { liveSeconds, ROLLOUTS, ROLLOUT_STEPS, type DiagnosisResult, type Progress } from './diagnosis';
+import type { RepairOutcome } from './repair';
 import { h } from './ui';
 
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -14,6 +15,29 @@ export class AnalysisPanel {
   }
 
   hide() { this.el.classList.remove('show'); }
+
+  /** The hologram is showing the predicted repair; the live repair follows. */
+  plan() {
+    const chip = this.el.querySelector('.ai-chip');
+    if (chip) { chip.className = 'ai-chip run'; chip.textContent = 'repairing'; }
+    this.el.querySelector('.plan-note')?.remove();
+    this.el.querySelector('.verdict')?.insertAdjacentHTML('afterend',
+      '<p class="plan-note"><span class="sw blue"></span>Blue hologram: the shape the 8 simulations predict. Dotted lines: vessels that will reconnect.</p>');
+  }
+
+  /** Forecast vs actual, once the live repair has finished. */
+  actual(o: RepairOutcome, f: DiagnosisResult) {
+    const chip = this.el.querySelector('.ai-chip');
+    if (chip) { chip.className = 'ai-chip ok'; chip.textContent = 'repaired'; }
+    this.el.querySelector('.fva')?.remove();
+    const row = (k: string, a: string, b: string) => `<tr><th>${k}</th><td>${a}</td><td>${b}</td></tr>`;
+    this.el.insertAdjacentHTML('beforeend', `
+      <table class="fva"><thead><tr><th></th><th>Forecast</th><th>Actual</th></tr></thead><tbody>
+        ${row('Shape', pct(f.shape), pct(o.shape))}
+        ${row('Vessels', pct(f.vessels), pct(o.vessels))}
+        ${row('Time', `${f.predictedSteps} steps`, `${o.healedAt} steps`)}
+      </tbody></table>`);
+  }
 
   progress(p: Progress) {
     if (!p.running) return; // the result view takes over
@@ -36,7 +60,7 @@ export class AnalysisPanel {
     const ok = r.rollouts.filter((x) => x.success).length;
     const dots = r.rollouts.map((x, i) =>
       `<span class="roll ${x.success ? 'ok' : 'bad'}" title="run ${i + 1}: shape ${pct(x.final.iou)}, vessels ${pct(x.final.connectivity)}"></span>`).join('');
-    const secs = r.predictedSteps / LIVE_STEPS_PER_SEC;
+    const secs = liveSeconds(r.predictedSteps);
     const verdict = r.repairable
       ? `<div class="verdict ok"><b>REPAIRABLE</b><span>${Math.round(r.confidence * 100)}% confidence</span></div>`
       : `<div class="verdict bad"><b>NOT REPAIRABLE</b><span>${Math.round(r.confidence * 100)}% confidence</span></div>

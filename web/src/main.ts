@@ -2,6 +2,7 @@ import './style.css';
 import { BodyView3D, ORGANS, type OrganId } from './body3d';
 import { AnalysisPanel } from './analysis';
 import { OrganStage } from './organstage';
+import { PHASES, type RepairState } from './repair';
 import { h } from './ui';
 
 const canvas = document.getElementById('three') as HTMLCanvasElement;
@@ -27,6 +28,11 @@ ui.appendChild(top);
 const hint = h('div', { class: 'hint' }, 'Drag to rotate · scroll to zoom · click an organ');
 ui.appendChild(hint);
 
+const brainNote = h('div', { class: 'brain-note glass' },
+  '<b>AI Brain</b>Each cell carries 11 hidden numbers that no one designed: the network invented them to talk to its neighbours. '
+  + 'Colours show three of them; brightness shows where they are changing. Cut the organ and watch the signal spread from the wound.');
+ui.appendChild(brainNote);
+
 const label = h('div', { class: 'organ-label' });
 ui.appendChild(label);
 
@@ -34,6 +40,24 @@ const focusPanel = h('div', { class: 'focus-panel glass' });
 ui.appendChild(focusPanel);
 
 const analysis = new AnalysisPanel(ui);
+
+// repair phases, bottom of the screen (each one lights up when the simulation reaches it)
+const phases = h('div', { class: 'phases glass' });
+phases.innerHTML = `<ol>${PHASES.map((p, i) => `<li data-i="${i}"><span class="pdot"></span>${p}</li>`).join('<li class="pline" aria-hidden="true"></li>')}</ol><div class="pstat"></div>`;
+ui.appendChild(phases);
+function showPhases(st: RepairState | null) {
+  phases.classList.toggle('show', !!st);
+  if (!st) return;
+  phases.querySelectorAll<HTMLElement>('li[data-i]').forEach((li) => {
+    const i = +li.dataset.i!;
+    li.classList.toggle('done', st.done[i]);
+    li.classList.toggle('active', !st.finished && i === st.active);
+  });
+  const sm = st.sample;
+  phases.querySelector('.pstat')!.textContent = st.finished
+    ? `Repair complete · ${st.step} steps · shape ${(sm.iou * 100).toFixed(1)}% · vessels ${(sm.connectivity * 100).toFixed(1)}%`
+    : `step ${st.step} · wound closed ${(sm.mouth * 100).toFixed(0)}% · refilled ${(sm.fill * 100).toFixed(0)}% · vessels ${(sm.connectivity * 100).toFixed(1)}%`;
+}
 
 function setXray(on: boolean) {
   view.xrayTarget = on ? 1 : 0;
@@ -54,7 +78,16 @@ function select(id: OrganId) {
   if (cuttable) {
     actions.appendChild(h('div', { class: 'fp-cut', id: 'cut-info' }, 'No lesion yet'));
     const reset = h('button', { class: 'pill' }, 'Reset organ');
-    reset.onclick = () => { stage?.reset(); setCutInfo(null); analysis.hide(); };
+    reset.onclick = () => { stage?.reset(); setCutInfo(null); analysis.hide(); showPhases(null); };
+    const brain = h('button', { class: 'pill brain', 'aria-pressed': 'false' }, '<span class="dot"></span>AI Brain');
+    brain.onclick = () => {
+      const on = !(stage?.brain ?? false);
+      stage?.setBrain(on);
+      brain.classList.toggle('on', on);
+      brain.setAttribute('aria-pressed', String(on));
+      brainNote.classList.toggle('show', on);
+    };
+    actions.appendChild(brain);
     actions.appendChild(reset);
     prepareStage(id);
   } else {
@@ -75,6 +108,7 @@ function setCutInfo(info: { depthMm: number; lengthMm: number } | null) {
 function unselect() {
   showStage(false);
   analysis.hide();
+  showPhases(null);
   view.unfocus();
   top.classList.remove('dim');
   focusPanel.classList.remove('show');
@@ -86,10 +120,13 @@ function prepareStage(id: OrganId) {
     stageLoading = OrganStage.create(gpuCanvas, trailCanvas, id).then((s) => {
       stage = s;
       if (s) {
-        s.onCut = (info) => setCutInfo(info);
+        s.onCut = (info) => { setCutInfo(info); showPhases(null); };
+        s.onPlan = () => analysis.plan();
+        s.onRepair = (st) => showPhases(st);
+        s.onRepairDone = (o, f) => analysis.actual(o, f);
         if (s.diagnosis) {
           s.diagnosis.onProgress = (p) => analysis.progress(p);
-          s.diagnosis.onResult = (r) => { s.showDiagnosis(r.aux, r.repairable); analysis.result(r); };
+          s.diagnosis.onResult = (r) => { analysis.result(r); s.showDiagnosis(r); };
         }
       }
       if (import.meta.env.DEV) (window as unknown as { __stage: OrganStage | null }).__stage = s;

@@ -25,6 +25,8 @@ export interface OrganMeta {
   b1: number[];
   w2: number[];
   world?: { center: [number, number, number]; half: number };
+  /** hidden channels that carry the wound signal (shown by the AI Brain view) */
+  brain_channels?: [number, number, number];
 }
 
 export interface Organ {
@@ -203,7 +205,6 @@ export class Simulation {
     this.packBG = d.createBindGroup({
       layout: k.packPipe.getBindGroupLayout(0),
       entries: [e(0, this.packU), e(1, this.state), e(2, this.wound), e(3, this.nutA), e(4, this.act),
-        e(5, this.toxA), e(6, this.growth),
         { binding: 7, resource: this.tex[0].createView() },
         { binding: 8, resource: this.tex[1].createView() },
         { binding: 9, resource: this.tex[2].createView() },
@@ -226,7 +227,8 @@ export class Simulation {
 
   setHiddenSel(i: number) {
     this.hiddenSel = i;
-    this.k.device.queue.writeBuffer(this.packU, 0, new Uint32Array([this.n, i, 0, 0]));
+    const b = this.k.organ.meta.brain_channels ?? [5 + i, 6, 7];
+    this.k.device.queue.writeBuffer(this.packU, 0, new Uint32Array([this.n, b[0], b[1], b[2]]));
   }
 
   /** Clear everything and plant the single seed cell. */

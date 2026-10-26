@@ -36,6 +36,9 @@ def export(organ: str):
         b1=[round(float(v), 6) for v in b1.ravel()],
         w2=[round(float(v), 6) for v in w2.ravel()],
     )
+    brain = ROOT / "targets" / "data" / f"{organ}_brain.json"
+    if brain.exists():
+        meta.update(json.loads(brain.read_text()))
     (out / f"{organ}.json").write_text(json.dumps(meta))
     labels.astype(np.uint8).tofile(out / f"{organ}.labels.bin")
     print("exported", organ, "hidden", w1.shape[0], "iters", meta["trained_iters"])

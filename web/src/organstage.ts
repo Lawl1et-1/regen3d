@@ -6,7 +6,8 @@ import { initGPU } from './gpu';
 import { invert, mat4, v3, type M4, type V3 } from './math';
 import { Renderer, type CamLike, type FrameOpts } from './renderer';
 import { Scene } from './scene';
-import { Diagnosis } from './diagnosis';
+import { Diagnosis, liveStepsPerSec, type DiagnosisResult } from './diagnosis';
+import { RepairTracker, type RepairOutcome, type RepairState } from './repair';
 import { Simulation, TOOL_WEDGE } from './sim';
 import { raycastTissue } from './tissue';
 
@@ -37,6 +38,16 @@ export class OrganStage {
   private lesioned = false;
   private diagPending = false;
   diag: [number, number] = [0, 0];
+  /** idle -> (diagnosis) -> plan (hologram preview) -> repair (live) -> done */
+  mode: 'idle' | 'plan' | 'repair' | 'done' = 'idle';
+  private modeT = 0;
+  private ghost = 0;
+  private tracker: RepairTracker | null = null;
+  private repairStart = 0;
+  brain = false;
+  onRepair?: (s: RepairState) => void;
+  onRepairDone?: (o: RepairOutcome, forecast: DiagnosisResult) => void;
+  onPlan?: () => void;
   tissue: [number, number, number, number] = [0.36, 0.085, 0.065, 1];
 
   private constructor(readonly canvas: HTMLCanvasElement, readonly overlay: CanvasRenderingContext2D) {}
@@ -91,6 +102,7 @@ export class OrganStage {
     this.diagnosis?.cancel();
     sim.uploadAux(null);
     this.diag = [0, 0];
+    this.stopRepair();
     this.healthy = null;
     this.lesioned = false;
     this.diagPending = false;
@@ -100,12 +112,26 @@ export class OrganStage {
     this.lastVP.fill(NaN);
   }
 
-  /** Show the diagnosis overlay (orange uncertainty, red critical area). */
-  showDiagnosis(aux: Uint8Array<ArrayBuffer>, repairable: boolean) {
-    this.scene.sim.uploadAux(aux);
-    this.diag = repairable ? [1, 0] : [0.6, 1];
+  /** Show the diagnosis overlay; when repairable, preview the plan then repair live. */
+  showDiagnosis(r: DiagnosisResult) {
+    this.scene.sim.uploadAux(r.aux);
+    this.diag = r.repairable ? [1, 0] : [0.6, 1];
     this.lastVP.fill(NaN);
+    if (r.repairable) {
+      this.tracker = new RepairTracker(r);
+      this.mode = 'plan';
+      this.modeT = 0;
+      this.onPlan?.();
+    }
   }
+
+  stopRepair() {
+    this.mode = 'idle';
+    this.tracker = null;
+    this.ghost = 0;
+  }
+
+  setBrain(on: boolean) { this.brain = on; this.lastVP.fill(NaN); }
 
   syncCamera(c: THREE.PerspectiveCamera, target: THREE.Vector3) {
     c.updateMatrixWorld();
@@ -213,6 +239,7 @@ export class OrganStage {
     this.lesioned = true;
     this.diagPending = true;
     this.diag = [0, 0];
+    this.stopRepair();
     const mm = this.scene.organ.meta.world ? (this.scene.organ.meta.world.half * 2 * 1000) / n : 1;
     this.onCut?.({ depthMm: depth * mm, lengthMm: (s1 - s0) * mm });
   }
@@ -247,12 +274,22 @@ export class OrganStage {
 
     const sc = this.scene;
     const trained = sc.organ.meta.hidden > 0;
-    // live repair comes with the repair visuals (step 5); for now the lesion stays as cut
-    const steps = 0;
+    // plan: the hologram shows the predicted repair for a moment, then the AI repairs live
+    this.modeT += dt;
+    if (this.mode === 'plan' && this.modeT > 2.8) {
+      this.mode = 'repair';
+      this.modeT = 0;
+      this.repairStart = sc.sim.steps;
+      sc.paused = false;
+    }
+    const ghostGoal = this.mode === 'plan' || this.mode === 'repair' ? 1 : 0;
+    this.ghost += Math.sign(ghostGoal - this.ghost) * Math.min(Math.abs(ghostGoal - this.ghost), dt * (ghostGoal ? 1.8 : 0.8));
+    if (this.mode === 'repair') sc.speed = liveStepsPerSec(sc.sim.steps - this.repairStart) / 30;
+    const steps = this.mode === 'repair' ? sc.stepsThisFrame(dt) : 0;
     const simChanged = this.needPack || sc.sim.pendingTools > 0 || steps > 0;
     const vp = this.cam.viewProj;
     const camChanged = vp.some((v, i) => v !== this.lastVP[i]);
-    const animating = this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5);
+    const animating = this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
     if (simChanged || camChanged || animating || this.needRead) {
       const enc = this.device.createCommandEncoder();
       let read = null;
@@ -267,17 +304,31 @@ export class OrganStage {
         if (read) this.needRead = false;
       }
       const opts: FrameOpts = {
-        mode: 0, time: this.time, hiddenGain: 1, signalGain: 0, pulseFront: 2, pulseAmt: 0,
+        mode: this.brain ? 3 : 0, time: this.time, hiddenGain: 1, signalGain: 0, pulseFront: 2, pulseAmt: 0,
         clip: { on: false, n: [0, 0, 1], d: 0 }, flash: this.flash * 0.25, exposure: 1.0,
         growthRate: 0, debrisRate: 0, sparks: { a: [0, 0, 0], b: [0, 0, 0], on: false }, pieceVel: [0, 0, 0],
       };
       this.renderer.render(enc, this.cam, {
-        sim: sc.sim, toWorld: this.toWorld, tissue: this.tissue, diag: this.diag,
+        sim: sc.sim, toWorld: this.toWorld, tissue: this.tissue, diag: this.mode === 'idle' ? this.diag : this.mode === 'done' ? [0, 0] : [this.diag[0] * (1 - this.ghost), this.diag[1]],
+      ghostAmt: this.ghost, ghostTint: [0.35, 0.62, 1.0, 1],
         cuts: this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
       }, null, opts, dt);
       this.device.queue.submit([enc.finish()]);
       const wasLesioned = this.lesioned;
-      read?.().then(() => { if (!wasLesioned && !this.lesioned) this.healthy = sc.latestSummary; });
+      const tracker = this.mode === 'repair' ? this.tracker : null;
+      const repairStep = sc.sim.steps - this.repairStart;
+      read?.().then(() => {
+        if (!wasLesioned && !this.lesioned) this.healthy = sc.latestSummary;
+        // measure the live repair and detect its phases
+        if (tracker && tracker === this.tracker && sc.latestSummary && sc.latest && !tracker.finished) {
+          const st = tracker.update(repairStep, sc.latestSummary, sc.latest);
+          this.onRepair?.(st);
+          if (st.finished) {
+            this.mode = 'done';
+            this.onRepairDone?.(tracker.outcome(), tracker.forecast);
+          }
+        }
+      });
       this.lastVP.set(vp);
       // the cut is now applied on the GPU: let the AI analyse it
       if (this.diagPending && sc.sim.pendingTools === 0 && this.diagnosis && this.healthy) {

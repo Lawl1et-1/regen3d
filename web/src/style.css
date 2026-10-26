@@ -113,6 +113,35 @@ button { font: inherit; color: inherit; }
 .sw.orange { background: #ff8a1f; box-shadow: 0 0 8px #ff8a1f; }
 .sw.red { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
 
+/* ---------- repair phases */
+.phases {
+  position: fixed; left: calc((100vw - 316px) / 2); bottom: 74px; transform: translate(-50%, 8px); padding: 10px 16px 9px; opacity: 0;
+  transition: opacity 0.4s, transform 0.4s; pointer-events: none !important; text-align: center;
+}
+.phases.show { opacity: 1; transform: translate(-50%, 0); }
+.phases ol { list-style: none; display: flex; align-items: center; margin: 0; padding: 0; }
+.phases li[data-i] { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; color: var(--faint); transition: color 0.3s; white-space: nowrap; }
+.phases .pline { width: 34px; height: 1px; background: var(--line-strong); margin: 0 10px; }
+.phases .pdot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--faint); transition: all 0.3s; }
+.phases li.active { color: var(--accent); }
+.phases li.active .pdot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: blink 1s ease-in-out infinite; }
+.phases li.done { color: var(--text); }
+.phases li.done .pdot { border-color: var(--ok); background: var(--ok); }
+.pstat { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.plan-note { display: flex; gap: 8px; align-items: flex-start; margin: -2px 0 12px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.sw.blue { flex: none; margin-top: 3px; background: #5aa0ff; box-shadow: 0 0 8px #5aa0ff; }
+.fva { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12.5px; }
+.fva th, .fva td { padding: 5px 4px; text-align: right; border-top: 1px solid var(--line); }
+.fva thead th { color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-top: 0; }
+.fva tbody th { text-align: left; color: var(--muted); font-weight: 400; }
+.fva td { font-family: var(--mono); }
+.brain-note {
+  position: fixed; left: 16px; top: 320px; width: 280px; padding: 12px 14px; font-size: 12px; line-height: 1.5; color: var(--muted);
+  opacity: 0; transition: opacity 0.3s; pointer-events: none !important;
+}
+.brain-note b { display: block; color: var(--accent); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 4px; }
+.brain-note.show { opacity: 1; }
+
 #disclaimer {
   position: fixed; left: 0; right: 0; bottom: 10px; display: flex; justify-content: center; gap: 16px;
   font-size: 11px; color: var(--muted); pointer-events: none; text-shadow: 0 1px 2px #000;
@@ -125,6 +154,10 @@ button { font: inherit; color: inherit; }
 .fatal p { color: var(--muted); margin: 8px 0; }
 
 @media (max-width: 640px) {
+  .phases { left: 50%; bottom: 60px; max-width: calc(100vw - 16px); }
+  .phases .pline { width: 10px; margin: 0 4px; }
+  .phases li[data-i] { font-size: 11px; }
+  .brain-note { display: none; }
   .ai-panel { top: auto; bottom: 70px; right: 8px; left: 8px; width: auto; max-height: 46vh; overflow: auto; }
   .organ-tag { display: none; }
   .hint { bottom: 52px; }

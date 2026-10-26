@@ -11,7 +11,10 @@ export const ROLLOUT_STEPS = 120;
 const CHECKS = [0, 4, 8, 12, 16, 24, 32, 48, 64, 90, 120];
 const SHAPE_OK = 0.9;      // a rollout succeeds if it recovers > 90% of the shape...
 const VESSELS_OK = 0.9;    // ...with the vascular tree reconnected to the hilum
-export const LIVE_STEPS_PER_SEC = 20;
+/** Live repair speed: slow while the wound closes so the phases can be followed, then faster. */
+export const liveStepsPerSec = (step: number) => (step < 24 ? 2.5 : 8);
+/** Seconds the live repair takes to reach `steps`. */
+export const liveSeconds = (steps: number) => Math.min(steps, 24) / 2.5 + Math.max(0, steps - 24) / 8;
 
 export interface RolloutResult {
   success: boolean;
@@ -32,6 +35,9 @@ export interface DiagnosisResult {
   reasons: string[];        // why it is not repairable (measured, not scripted)
   /** rgba8 per voxel: r uncertainty, g critical area, b mean predicted tissue, a mean predicted vessel */
   aux: Uint8Array<ArrayBuffer>;
+  /** voxels removed by the lesion, and the part of it open to the outside (the wound mouth) */
+  lesion: Uint8Array;
+  mouth: Uint8Array;
 }
 
 export interface Progress { done: number; running: boolean; rollouts: RolloutResult[] }
@@ -178,7 +184,16 @@ export class Diagnosis {
       if (!reasons.length) reasons.push(`The simulated repairs disagree: only ${ok} of ${ROLLOUTS} recover both shape and vessels.`);
     }
 
+    // wound mouth: lesion voxels within 2 voxels of the outside of the healthy organ
+    const outside = new Uint8Array(nv);
+    for (let i = 0; i < nv; i++) if (!(healthy[i] & 0xff)) outside[i] = 1;
+    const nearOut = dilate(outside, n, 2);
+    const les = lesion ?? new Uint8Array(nv);
+    const mouth = new Uint8Array(nv);
+    for (let i = 0; i < nv; i++) if (les[i] && nearOut[i]) mouth[i] = 1;
+
     this.result = {
+      lesion: les, mouth,
       repairable, probability, confidence: repairable ? probability : 1 - probability,
       predictedSteps, shape, vessels, lesionShare: lesionCount / Math.max(1, this.metrics.targetCounts.slice(1).reduce((a, b) => a + b, 0)),
       rollouts: R, reasons, aux,

@@ -3,9 +3,9 @@
 
 struct Pack {
   n: u32,
-  hiddenSel: u32,
-  _a: u32,
-  _b: u32,
+  brain0: u32,   // the three hidden channels shown by the AI Brain view (state indices 5..15)
+  brain1: u32,
+  brain2: u32,
 };
 
 @group(0) @binding(0) var<uniform> K: Pack;
@@ -13,8 +13,6 @@ struct Pack {
 @group(0) @binding(2) var<storage, read> wound: array<f32>;
 @group(0) @binding(3) var<storage, read> nut: array<f32>;
 @group(0) @binding(4) var<storage, read> act: array<f32>;
-@group(0) @binding(5) var<storage, read> toxin: array<f32>;
-@group(0) @binding(6) var<storage, read> growth: array<f32>;
 @group(0) @binding(7) var tex0: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(8) var tex1: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(9) var tex2: texture_storage_3d<rgba16float, write>;
@@ -29,8 +27,9 @@ fn pack(@builtin(global_invocation_id) gid: vec3u) {
   let s1 = state[i * 4u + 1u];
   let s2 = state[i * 4u + 2u];
   let s3 = state[i * 4u + 3u];
-  let hs = array<f32, 11>(s1.y, s1.z, s1.w, s2.x, s2.y, s2.z, s2.w, s3.x, s3.y, s3.z, s3.w);
-  let h = hs[min(K.hiddenSel, 10u)];
+  let ch = array<f32, 16>(s0.x, s0.y, s0.z, s0.w, s1.x, s1.y, s1.z, s1.w, s2.x, s2.y, s2.z, s2.w, s3.x, s3.y, s3.z, s3.w);
+  let h = ch[min(K.brain0, 15u)];
+  let brain = tanh(vec3f(ch[min(K.brain0, 15u)], ch[min(K.brain1, 15u)], ch[min(K.brain2, 15u)]));
   let a = clamp(s0.x, 0.0, 1.0);
   let types = clamp(vec4f(s0.y, s0.z, s0.w, s1.x), vec4f(0.0), vec4f(1.0));
   // render-only smoothing: a 3x3x3 binomial filter so the 48^3 grid shows no voxel steps
@@ -72,7 +71,7 @@ fn pack(@builtin(global_invocation_id) gid: vec3u) {
   let va = max(sa.x, a * 0.6);
   textureStore(tex0, gid, vec4f(va, sa.y, sa.z, sa.w));
   textureStore(tex1, gid, vec4f(sd, h, nut[i], act[i]));
-  textureStore(tex2, gid, vec4f(max(wound[i], swd / 64.0 * 1.6), toxin[i], growth[i], 0.0));
+  textureStore(tex2, gid, vec4f(max(wound[i], swd / 64.0 * 1.6), brain));
 
   var cls = 0u;
   if (s0.x > 0.1) {
