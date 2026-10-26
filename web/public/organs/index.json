@@ -1,5 +1,10 @@
 [
  {
+  "name": "heart",
+  "label": "Heart",
+  "n": 48
+ },
+ {
   "name": "kidney",
   "label": "Kidney",
   "n": 48
@@ -7,6 +12,11 @@
  {
   "name": "liver",
   "label": "Liver",
+  "n": 48
+ },
+ {
+  "name": "lung",
+  "label": "Lung",
   "n": 48
  }
 ]
