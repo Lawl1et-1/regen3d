@@ -25,6 +25,8 @@ export interface VolumeView {
   injuries?: Injury[];
   compare?: boolean;
   tissue?: [number, number, number, number];
+  /** diagnosis overlay strengths: uncertainty (orange), critical area (red) */
+  diag?: [number, number];
 }
 
 export interface FrameOpts {
@@ -86,6 +88,7 @@ export class Renderer {
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         tex3(2), tex3(3), tex3(4), tex3(5), tex3(6), tex3(7),
         { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } },
+        tex3(9),
       ],
     });
     const rmod = d.createShaderModule({ code: rayCode, label: 'raymarch' });
@@ -136,8 +139,8 @@ export class Renderer {
 
     this.sampler = d.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', addressModeW: 'clamp-to-edge' });
     const ub = (size: number) => d.createBuffer({ size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.uMain = ub(544);
-    this.uPiece = ub(544);
+    this.uMain = ub(576);
+    this.uPiece = ub(576);
     this.uPost = ub(32);
     this.uPart = ub(288);
     const np = PARTICLES.growth + PARTICLES.debris + PARTICLES.sparks;
@@ -164,7 +167,7 @@ export class Renderer {
   }
 
   private writeVolumeUniforms(buf: GPUBuffer, cam: CamLike, v: VolumeView, o: FrameOpts, w: number, h: number) {
-    const f = new Float32Array(136);
+    const f = new Float32Array(140);
     f.set(cam.invViewProj, 0);
     f.set(cam.viewProj, 16);
     f.set(invert(v.toWorld), 32);
@@ -188,6 +191,7 @@ export class Renderer {
     }
     f.set(v.ghostTint ?? [0, 0, 0, 0], 128);
     f.set(v.tissue ?? [0.86, 0.40, 0.37, 1], 132);
+    f.set([v.diag?.[0] ?? 0, v.diag?.[1] ?? 0, o.time, 0], 136);
     this.device.queue.writeBuffer(buf, 0, f);
   }
 
@@ -206,6 +210,7 @@ export class Renderer {
         { binding: 6, resource: g.tex[0].createView() },
         { binding: 7, resource: g.tex[1].createView() },
         { binding: 8, resource: depthIn.createView() },
+        { binding: 9, resource: s.auxTex.createView() },
       ],
     });
   }

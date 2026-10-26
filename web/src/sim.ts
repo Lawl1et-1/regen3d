@@ -132,6 +132,8 @@ export class Simulation {
   readonly summary: GPUBuffer;
   readonly tex: GPUTexture[];
   readonly perfTex: GPUTexture;
+  /** Diagnosis overlay (rgba8): uncertainty, critical area, predicted tissue, predicted vessels. */
+  readonly auxTex: GPUTexture;
   private readonly params: GPUBuffer;
   private readonly fieldU: GPUBuffer;
   private readonly packU: GPUBuffer;
@@ -173,6 +175,10 @@ export class Simulation {
       label: `${label}-tex${i}`, size: [n, n, n], dimension: '3d', format: 'rgba16float',
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
     }));
+    this.auxTex = d.createTexture({
+      size: [n, n, n], dimension: '3d', format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
     this.perfTex = d.createTexture({
       size: [n, n, n], dimension: '3d', format: 'r8unorm',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
@@ -370,6 +376,12 @@ export class Simulation {
     };
   }
 
+  uploadAux(data: Uint8Array<ArrayBuffer> | null) {
+    const n = this.n;
+    this.k.device.queue.writeTexture({ texture: this.auxTex }, data ?? new Uint8Array(n * n * n * 4),
+      { bytesPerRow: n * 4, rowsPerImage: n }, [n, n, n]);
+  }
+
   uploadPerfusion(data: Uint8Array<ArrayBuffer>) {
     const n = this.n;
     this.k.device.queue.writeTexture({ texture: this.perfTex }, data, { bytesPerRow: n, rowsPerImage: n }, [n, n, n]);
@@ -400,6 +412,6 @@ export class Simulation {
   destroy() {
     for (const b of [this.state, this.next, this.pre, this.act, this.wound, this.growth, this.toxA, this.toxB,
       this.nutA, this.nutB, this.summary, this.ctrl, this.params, this.fieldU, this.packU, ...this.staging]) b.destroy();
-    for (const t of [...this.tex, this.perfTex]) t.destroy();
+    for (const t of [...this.tex, this.perfTex, this.auxTex]) t.destroy();
   }
 }

@@ -1,5 +1,6 @@
 import './style.css';
 import { BodyView3D, ORGANS, type OrganId } from './body3d';
+import { AnalysisPanel } from './analysis';
 import { OrganStage } from './organstage';
 import { h } from './ui';
 
@@ -32,6 +33,8 @@ ui.appendChild(label);
 const focusPanel = h('div', { class: 'focus-panel glass' });
 ui.appendChild(focusPanel);
 
+const analysis = new AnalysisPanel(ui);
+
 function setXray(on: boolean) {
   view.xrayTarget = on ? 1 : 0;
   xrayBtn.classList.toggle('on', on);
@@ -51,7 +54,7 @@ function select(id: OrganId) {
   if (cuttable) {
     actions.appendChild(h('div', { class: 'fp-cut', id: 'cut-info' }, 'No lesion yet'));
     const reset = h('button', { class: 'pill' }, 'Reset organ');
-    reset.onclick = () => { stage?.reset(); setCutInfo(null); };
+    reset.onclick = () => { stage?.reset(); setCutInfo(null); analysis.hide(); };
     actions.appendChild(reset);
     prepareStage(id);
   } else {
@@ -66,11 +69,12 @@ function select(id: OrganId) {
 
 function setCutInfo(info: { depthMm: number; lengthMm: number } | null) {
   const el = document.getElementById('cut-info');
-  if (el) el.textContent = info ? `Lesion · ${info.lengthMm.toFixed(0)} mm long · ${info.depthMm.toFixed(0)} mm deep` : 'No lesion yet';
+  if (el) el.textContent = info ? `Last cut · ${info.lengthMm.toFixed(0)} mm long · ${info.depthMm.toFixed(0)} mm deep` : 'No lesion yet';
 }
 
 function unselect() {
   showStage(false);
+  analysis.hide();
   view.unfocus();
   top.classList.remove('dim');
   focusPanel.classList.remove('show');
@@ -81,7 +85,13 @@ function prepareStage(id: OrganId) {
   if (!stageLoading) {
     stageLoading = OrganStage.create(gpuCanvas, trailCanvas, id).then((s) => {
       stage = s;
-      if (s) s.onCut = (info) => setCutInfo(info);
+      if (s) {
+        s.onCut = (info) => setCutInfo(info);
+        if (s.diagnosis) {
+          s.diagnosis.onProgress = (p) => analysis.progress(p);
+          s.diagnosis.onResult = (r) => { s.showDiagnosis(r.aux, r.repairable); analysis.result(r); };
+        }
+      }
       if (import.meta.env.DEV) (window as unknown as { __stage: OrganStage | null }).__stage = s;
       return s;
     }).catch((e) => { console.error(e); return null; });

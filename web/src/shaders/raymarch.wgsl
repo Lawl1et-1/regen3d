@@ -22,6 +22,7 @@ struct U {
   inj: array<vec4f, 4>,
   focus: vec4f,    // tint rgb, tintAmt (UNRECOVERABLE red hologram)
   tissue: vec4f,   // parenchyma colour of this organ
+  diag: vec4f,     // diagnosis overlay: uncertainty strength, critical strength, time
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -33,6 +34,7 @@ struct U {
 @group(0) @binding(6) var g0: texture_3d<f32>;
 @group(0) @binding(7) var g1: texture_3d<f32>;
 @group(0) @binding(8) var depthIn: texture_2d<f32>;
+@group(0) @binding(9) var taux: texture_3d<f32>;   // r uncertainty, g critical, b predicted tissue, a predicted vessels
 
 struct VOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
@@ -429,6 +431,13 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
       let dots = smoothstep(0.62, 0.85, 0.5 + 0.5 * sin(dot(p, vec3f(1.0, 0.8, 0.6)) * n * 0.75 - time * 7.0));
       gem += mix(vec3f(0.7, 1.0, 1.0), tint, 0.3) * vp * dots * 3.0;
       col += T * gem * ghostAmt * dt * 22.0;
+    }
+
+    // AI diagnosis: orange where the simulated repairs disagree, red where tissue never comes back
+    if (u.diag.x + u.diag.y > 0.001) {
+      let ax = textureSampleLevel(taux, smp, p * 0.5 + 0.5, 0.0);
+      let unc = smoothstep(0.35, 0.95, ax.r);  // only clear disagreement glows
+      col += T * (vec3f(1.0, 0.38, 0.04) * unc * u.diag.x * 7.0 + vec3f(0.9, 0.03, 0.06) * smoothstep(0.2, 0.8, ax.g) * u.diag.y * 3.5) * dt;
     }
 
     var stepMul = 1.0;
