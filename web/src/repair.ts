@@ -10,7 +10,9 @@ export const PHASES = ['Sealing', 'Vessels', 'Refilling', 'Finishing'] as const;
 export const REPAIR_MAX_STEPS = 160;
 
 export interface RepairSample { step: number; iou: number; connectivity: number; func: number; mouth: number; fill: number }
-export interface RepairState { step: number; done: boolean[]; active: number; sample: RepairSample; finished: boolean }
+/** share of the lesion rebuilt for each cell type (null = not in the lesion), and the order they were completed in */
+export interface TypeRegrowth { share: (number | null)[]; order: number[] }
+export interface RepairState { step: number; done: boolean[]; active: number; sample: RepairSample; finished: boolean; types: TypeRegrowth }
 export interface RepairOutcome { shape: number; vessels: number; healedAt: number; steps: number }
 
 export class RepairTracker {
@@ -18,9 +20,11 @@ export class RepairTracker {
   readonly done = [false, false, false, false];
   private lesionIdx: Int32Array;
   private mouthIdx: Int32Array;
+  private typeIdx: Int32Array[];
+  private order: number[] = [];
   finished = false;
 
-  constructor(readonly forecast: DiagnosisResult) {
+  constructor(readonly forecast: DiagnosisResult, target: Uint8Array) {
     const idx = (m: Uint8Array) => {
       const out: number[] = [];
       for (let i = 0; i < m.length; i++) if (m[i]) out.push(i);
@@ -28,6 +32,7 @@ export class RepairTracker {
     };
     this.lesionIdx = idx(forecast.lesion);
     this.mouthIdx = idx(forecast.mouth);
+    this.typeIdx = [1, 2, 3, 4].map((t) => this.lesionIdx.filter((i) => target[i] === t));
   }
 
   /** Feed a measurement (class grid + metrics) taken `step` steps into the repair. */
@@ -50,7 +55,16 @@ export class RepairTracker {
     if (this.done[0] && this.done[2] && still && s.iou >= f.shape - 0.01) this.done[3] = true;
     if (this.done[3] || step >= REPAIR_MAX_STEPS) this.finished = true;
     const active = this.done.findIndex((d) => !d);
-    return { step, done: [...this.done], active, sample: s, finished: this.finished };
+    // a cell type counts as rebuilt once 80% of its lost voxels are that type again
+    const typeShare = this.typeIdx.map((ix, k) => {
+      if (!ix.length) return null;
+      let a = 0;
+      for (const i of ix) if ((sum[i] & 0xff) === k + 1) a++;
+      const v = a / ix.length;
+      if (v >= 0.8 && !this.order.includes(k)) this.order.push(k);
+      return v;
+    });
+    return { step, done: [...this.done], active, sample: s, finished: this.finished, types: { share: typeShare, order: [...this.order] } };
   }
 
   outcome(): RepairOutcome {

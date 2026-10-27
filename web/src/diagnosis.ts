@@ -107,7 +107,7 @@ export class Diagnosis {
       const perf = this.metrics.perfusion;
       for (let i = 0; i < nv; i++) {
         if (lastSum[i] & 0xff) alive[i]++;
-        if (perf[i]) vessel[i]++;
+        if (perf[4 * i]) vessel[i]++;
       }
       this.progress.rollouts.push({ success, final, curve, healedAt });
       this.progress.done = k + 1;

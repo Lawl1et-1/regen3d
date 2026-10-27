@@ -35,6 +35,26 @@ const TISSUE: Record<string, [number, number, number, number]> = {
   brain: [0.66, 0.46, 0.45, 1],
 };
 
+/** Cell types (labels 1..4) per organ, used until an export carries its own `types`. */
+const TYPES: Record<string, [string, string][]> = {
+  liver: [['capsule', '#f2d27a'], ['tissue', '#d9705f'], ['vessel tree', '#ff2d48'], ['central vein', '#5b7cff']],
+  heart: [['epicardium', '#f2d27a'], ['muscle wall', '#e0485a'], ['coronary arteries', '#ff9a3c'], ['coronary veins', '#5b7cff']],
+  kidney: [['cortex', '#f0a35e'], ['medulla', '#a8466b'], ['vessels', '#ff2d48'], ['ureter exit', '#f5e06b']],
+  lung: [['pleura', '#9fd8ff'], ['tissue', '#f2a0b0'], ['vessels', '#ff2d48'], ['bronchial tree', '#7cf0c8']],
+  bone: [['cortical shell', '#f4f1e6'], ['spongy bone', '#d9b98a'], ['vessels', '#ff2d48'], ['marrow', '#c4364f']],
+  skin: [['epidermis', '#f7d9c4'], ['dermis', '#e08c84'], ['small vessels', '#ff2d48'], ['(unused)', '#888888']],
+  stomach: [['serosa', '#f2d27a'], ['wall', '#e07a6a'], ['vessels', '#ff2d48'], ['veins', '#5b7cff']],
+  spleen: [['capsule', '#f2d27a'], ['pulp', '#b8405e'], ['vessels', '#ff2d48'], ['veins', '#5b7cff']],
+  pancreas: [['capsule', '#f2d27a'], ['tissue', '#e8b07a'], ['vessels', '#ff2d48'], ['pancreatic duct', '#7cf0c8']],
+  brain: [['cortex', '#d8a0c0'], ['white matter', '#f1e4ea'], ['vessels', '#ff2d48'], ['venous sinuses', '#5b7cff']],
+};
+
+/** sRGB hex -> linear rgb for the shader */
+function linear(hex: string): [number, number, number] {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255].map((c) => (c / 255) ** 2.2) as [number, number, number];
+}
+
 export class OrganStage {
   scene!: Scene;
   private renderer!: Renderer;
@@ -70,8 +90,11 @@ export class OrganStage {
   private tracker: RepairTracker | null = null;
   private repairStart = 0;
   brain = false;
-  /** X-ray of the vascular tree: watch vessels regrow and blood flow back in */
+  /** X-ray: every cell type in its own colour, vessels lit where blood reaches them */
   vessels = false;
+  /** movable cross-section, facing the camera; depth 0 = near side, 1 = far side */
+  section = { on: false, depth: 0.5 };
+  private heal = 0;
   onRepair?: (s: RepairState) => void;
   onRepairDone?: (o: RepairOutcome, forecast: DiagnosisResult) => void;
   onPlan?: () => void;
@@ -90,6 +113,9 @@ export class OrganStage {
   onCompare?: (c: { ai: Metrics; base: Metrics; frame: number; frames: number }) => void;
   onLearn?: (l: LearnProgress) => void;
   tissue: [number, number, number, number] = [0.36, 0.085, 0.065, 1];
+  /** the organ's cell types (labels 1..4) */
+  types: { name: string; color: string }[] = [];
+  private typeRgb: [number, number, number][] = [];
   /** one simulation + diagnosis per organ, created on first use */
   private organs = new Map<string, { scene: Scene; diagnosis: Diagnosis | null }>();
   onDiagProgress?: (p: Parameters<NonNullable<Diagnosis['onProgress']>>[0]) => void;
@@ -139,6 +165,8 @@ export class OrganStage {
     this.scene = o.scene;
     this.diagnosis = o.diagnosis;
     this.tissue = TISSUE[organ] ?? TISSUE.liver;
+    this.types = o.scene.organ.meta.types ?? (TYPES[organ] ?? TYPES.liver).map(([name, color]) => ({ name, color }));
+    this.typeRgb = this.types.slice(0, 4).map((t) => linear(t.color));
     const h = o.scene.organ.meta.world?.half ?? 0.13;
     this.toWorld.set([mirror ? -h : h, 0, 0, 0, 0, h, 0, 0, 0, 0, h, 0, center[0], center[1], center[2], 1]);
     this.reset();
@@ -202,7 +230,7 @@ export class OrganStage {
     this.diag = r.repairable ? [1, 0] : [0.6, 1];
     this.lastVP.fill(NaN);
     if (r.repairable) {
-      this.tracker = new RepairTracker(r);
+      this.tracker = new RepairTracker(r, this.scene.organ.labels);
       this.mode = 'plan';
       this.modeT = 0;
       this.onPlan?.();
@@ -213,6 +241,7 @@ export class OrganStage {
     this.mode = 'idle';
     this.tracker = null;
     this.ghost = 0;
+    this.scene.pulses.disarm();
   }
 
   /** A lesion has been analysed and (if repairable) repaired: the comparisons can run. */
@@ -299,6 +328,7 @@ export class OrganStage {
 
   setBrain(on: boolean) { this.brain = on; if (on) this.vessels = false; this.lastVP.fill(NaN); }
   setVessels(on: boolean) { this.vessels = on; if (on) this.brain = false; this.lastVP.fill(NaN); }
+  setSection(on: boolean, depth = this.section.depth) { this.section = { on, depth }; this.lastVP.fill(NaN); }
 
   syncCamera(c: THREE.PerspectiveCamera, target: THREE.Vector3) {
     c.updateMatrixWorld();
@@ -507,15 +537,21 @@ export class OrganStage {
       this.modeT = 0;
       this.repairStart = sc.sim.steps;
       sc.paused = false;
+      // watch for vessels reconnecting from here on
+      if (sc.latestSummary) sc.pulses.arm(sc.latestSummary);
     }
     const ghostGoal = this.mode === 'plan' || this.mode === 'repair' ? 1 : 0;
     this.ghost += Math.sign(ghostGoal - this.ghost) * Math.min(Math.abs(ghostGoal - this.ghost), dt * (ghostGoal ? 1.8 : 0.8));
+    // regrowing cells show their cell-type colour during the repair and after it
+    const healGoal = this.mode === 'repair' || this.mode === 'done' ? 1 : 0;
+    this.heal += Math.sign(healGoal - this.heal) * Math.min(Math.abs(healGoal - this.heal), dt * 1.5);
     if (this.mode === 'repair') sc.speed = liveStepsPerSec(sc.sim.steps - this.repairStart) / 30;
     const steps = this.mode === 'repair' ? sc.stepsThisFrame(dt) : 0;
     const simChanged = this.needPack || sc.sim.pendingTools > 0 || steps > 0;
     const vp = this.cam.viewProj;
     const camChanged = vp.some((v, i) => v !== this.lastVP[i]);
-    const animating = this.view !== 'live' || this.vessels || !!this.burn || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
+    const pulsing = this.time - sc.pulses.lastStart < 6;
+    const animating = this.view !== 'live' || this.vessels || pulsing || (this.heal > 0 && this.heal < 1) || !!this.burn || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
     if (simChanged || camChanged || animating || this.needRead) {
       const enc = this.device.createCommandEncoder();
       let read = null;
@@ -533,7 +569,7 @@ export class OrganStage {
         mode: this.brain ? 3 : this.vessels ? 2 : 0, time: this.time, hiddenGain: 1, signalGain: 0,
         // blood pulses travel from the hilum along every vessel still connected to it
         pulseFront: (this.time * 0.45) % 1.3, pulseAmt: this.vessels || this.mode === 'repair' ? 1 : 0,
-        clip: { on: false, n: [0, 0, 1], d: 0 }, flash: this.flash * 0.25, exposure: 1.0,
+        clip: this.clip(), flash: this.flash * 0.25, exposure: 1.0,
         growthRate: 0, debrisRate: 0, sparks: { a: [0, 0, 0], b: [0, 0, 0], on: false }, pieceVel: [0, 0, 0],
       };
       // side by side: the AI's repair on the left, hole filling on the right
@@ -560,6 +596,7 @@ export class OrganStage {
         diag: !live ? [0, 0] : this.mode === 'idle' ? this.diag : this.mode === 'done' ? [0, 0, 1] : [this.diag[0] * (1 - this.ghost), this.diag[1], 1],
         ghostAmt: live ? this.ghost : 0, ghostTint: [0.35, 0.62, 1.0, 1],
         cuts: live && this.cutAge >= 0 ? [{ n: [0, 0, 1], d: 0, age: this.cutAge }] : [],
+        rec: live ? sc.pulses.times : undefined, heal: live ? this.heal : 0, types: this.typeRgb,
       }, piece, opts, dt);
       this.device.queue.submit([enc.finish()]);
       const tracker = this.mode === 'repair' ? this.tracker : null;
@@ -584,6 +621,15 @@ export class OrganStage {
     }
     this.ready = !!sc.latestSummary;
     if (this.trail.length || this.trailDrawn) this.drawTrail(now);
+  }
+
+  /** Cross-section plane in volume space: faces the camera, `depth` slides it through the organ. */
+  private clip(): FrameOpts['clip'] {
+    if (!this.section.on || this.view !== 'live') return { on: false, n: [0, 0, 1], d: 0 };
+    const w = this.toWorld;
+    const toEye = v3.sub(this.cam.eye, [w[12], w[13], w[14]]);
+    const n = v3.norm(transformDir(invert(w), toEye)) as V3;
+    return { on: true, n, d: 0.9 - 1.8 * this.section.depth };
   }
 
   private drawTrail(now: number) {

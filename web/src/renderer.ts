@@ -27,6 +27,12 @@ export interface VolumeView {
   tissue?: [number, number, number, number];
   /** diagnosis overlay strengths: uncertainty (orange), critical area (red) */
   diag?: [number, number, number?];
+  /** start time of each reconnection pulse slot (-1 = none) */
+  rec?: number[];
+  /** how strongly regrowing cells show their cell-type colour (0..1) */
+  heal?: number;
+  /** linear rgb of the 4 cell types */
+  types?: [number, number, number][];
 }
 
 export interface FrameOpts {
@@ -45,6 +51,8 @@ export interface FrameOpts {
   pieceVel: V3;
   viewport?: [number, number, number, number];
 }
+
+const DEFAULT_TYPES: [number, number, number][] = [[0.9, 0.75, 0.2], [0.35, 0.75, 0.55], [0.92, 0.16, 0.22], [0.3, 0.5, 0.98]];
 
 const PARTICLES = { growth: 6000, debris: 9000, sparks: 1500 };
 const HDR: GPUTextureFormat = 'rgba16float';
@@ -139,8 +147,8 @@ export class Renderer {
 
     this.sampler = d.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', addressModeW: 'clamp-to-edge' });
     const ub = (size: number) => d.createBuffer({ size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.uMain = ub(576);
-    this.uPiece = ub(576);
+    this.uMain = ub(656);
+    this.uPiece = ub(656);
     this.uPost = ub(32);
     this.uPart = ub(288);
     const np = PARTICLES.growth + PARTICLES.debris + PARTICLES.sparks;
@@ -167,7 +175,7 @@ export class Renderer {
   }
 
   private writeVolumeUniforms(buf: GPUBuffer, cam: CamLike, v: VolumeView, o: FrameOpts, w: number, h: number) {
-    const f = new Float32Array(140);
+    const f = new Float32Array(164);
     f.set(cam.invViewProj, 0);
     f.set(cam.viewProj, 16);
     f.set(invert(v.toWorld), 32);
@@ -178,7 +186,7 @@ export class Renderer {
     f.set([...o.clip.n, o.clip.d], 76);
     f.set([o.hiddenGain, v.ghostAmt ?? 0, v.dissolve ?? 0, 0.12], 80);
     f.set([o.signalGain, o.pulseFront, o.pulseAmt, this.frame % 64], 84);
-    f.set([o.clip.on && o.mode === 5 ? 1 : 0, v.compare ? 1 : 0, (v.cuts?.length ?? 0) > 0 ? 1 : 0, 0], 88);
+    f.set([o.clip.on ? 1 : 0, v.compare ? 1 : 0, (v.cuts?.length ?? 0) > 0 ? 1 : 0, 0], 88);
     const cuts = v.cuts ?? [];
     for (let i = 0; i < 4; i++) {
       const c = cuts[i];
@@ -192,6 +200,10 @@ export class Renderer {
     f.set(v.ghostTint ?? [0, 0, 0, 0], 128);
     f.set(v.tissue ?? [0.86, 0.40, 0.37, 1], 132);
     f.set([v.diag?.[0] ?? 0, v.diag?.[1] ?? 0, o.time, v.diag?.[2] ?? 0], 136);
+    f.set(v.rec ?? [-1, -1, -1, -1], 140);
+    f.set([v.heal ?? 0, 0, 0, 0], 144);
+    const types = v.types ?? DEFAULT_TYPES;
+    for (let i = 0; i < 4; i++) f.set([...types[i], 1], 148 + i * 4);
     this.device.queue.writeBuffer(buf, 0, f);
   }
 

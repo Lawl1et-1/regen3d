@@ -23,6 +23,9 @@ struct U {
   focus: vec4f,    // tint rgb, tintAmt (UNRECOVERABLE red hologram)
   tissue: vec4f,   // parenchyma colour of this organ
   diag: vec4f,     // diagnosis overlay: uncertainty strength, critical strength, time, lesion highlight (vessels view)
+  rec: vec4f,      // start time of the 4 reconnection pulse slots (-1 = none)
+  heal: vec4f,     // x: regrowing cells shown in their cell-type colour
+  types: array<vec4f, 4>,  // colour of each cell type (labels 1..4)
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -77,6 +80,25 @@ fn S1(p: vec3f) -> vec4f { return textureSampleLevel(t1, smp, p * 0.5 + 0.5, 0.0
 fn S2(p: vec3f) -> vec4f { return textureSampleLevel(t2, smp, p * 0.5 + 0.5, 0.0); }
 fn G0(p: vec3f) -> vec4f { return textureSampleLevel(g0, smp, p * 0.5 + 0.5, 0.0); }
 fn PF(p: vec3f) -> f32 { return textureSampleLevel(tperf, smp, p * 0.5 + 0.5, 0.0).r; }
+
+fn typeCol(wn: vec4f) -> vec3f {
+  return wn.x * u.types[0].rgb + wn.y * u.types[1].rgb + wn.z * u.types[2].rgb + wn.w * u.types[3].rgb;
+}
+
+// light pulse running from the junction along a vessel that just got its blood back
+fn recPulse(p: vec3f) -> f32 {
+  let n = u.res.z;
+  let g = vec3i(clamp(floor((p * 0.5 + 0.5) * n), vec3f(0.0), vec3f(n - 1.0)));
+  let pr = textureLoad(tperf, g, 0);
+  let slot = i32(round(pr.b * 255.0 / 60.0)) - 1;
+  if (slot < 0 || slot > 3) { return 0.0; }
+  let t0 = u.rec[slot];
+  if (t0 < 0.0) { return 0.0; }
+  let age = u.cam.w - t0;
+  if (age < 0.0) { return 0.0; }
+  let d = pr.g * 255.0;
+  return exp(-pow((d - age * 14.0) / 2.2, 2.0)) * exp(-age * 0.3);
+}
 
 fn clipped(p: vec3f) -> bool { return u.flags.x > 0.5 && dot(p, u.clip.xyz) > u.clip.w; }
 fn A(p: vec3f) -> f32 { if (clipped(p)) { return 0.0; } return S0(p).x; }
@@ -202,6 +224,15 @@ fn section(p: vec3f, nrm: vec3f) -> vec3f {
   return col;
 }
 
+fn sectionFace(p: vec3f, axs: vec4f) -> vec3f {
+  let s0 = S0(p); let s1 = S1(p);
+  let w4 = clamp(vec4f(s0.y, s0.z, s0.w, s1.x), vec4f(0.0), vec4f(1.0));
+  let tc = typeCol(w4 / max(dot(w4, vec4f(1.0)), 0.05));
+  if (u.res.w > 1.5 && u.res.w < 2.5) { return tc * 0.9; }
+  let les = smoothstep(0.3, 0.7, axs.g) * u.heal.x;
+  return mix(section(p, u.clip.xyz) * 0.85, tc, les * 0.8);
+}
+
 struct March {
   col: vec3f,
   trans: f32,
@@ -273,7 +304,8 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
     if (first && histoStart) {
       first = false;
       if (dens > 0.25) {
-        let c = histology(p, u.clip.xyz) * 1.15;
+        var c = sectionFace(p, axs);
+        if (mode > 4.5) { c = histology(p, u.clip.xyz) * 1.15; }
         col += T * c;
         T = 0.0;
         res.depth = t / scale;
@@ -329,6 +361,7 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
         let pulse = 1.0 + u.params2.z * 3.0 * exp(-pow((pf - u.params2.y) / 0.05, 2.0)) * perfused;
         emit += wn.z * vec3f(0.95, 0.04, 0.07) * 0.12 * perfused * (pulse - 1.0) * (1.0 - cf);
         emit += wn.w * vec3f(0.10, 0.12, 0.45) * 0.15 * (1.0 - cf);
+        emit += wn.z * vec3f(1.0, 0.92, 0.75) * recPulse(p) * 3.0;
         // signal waves: hidden-channel activity glowing around the wound
         let act = s1.w;
         let sig = smoothstep(0.03, 0.3, act) * u.params2.x;
@@ -343,18 +376,16 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
         sigma = 70.0 * dens;
       } else if (mode < 2.5) {
         // ---------------- x-ray: vascular tree only
+        // ---------------- x-ray: every cell type in its own colour, see-through tissue
         let edge = pow(1.0 - abs(dot(N, V)), 2.5);
-        sigma = (wn.x * 0.6 + wn.y * 0.25) * dens + wn.z * 30.0 * dens + wn.w * 18.0 * dens;
+        sigma = (wn.x * 1.0 + wn.y * 0.5 + wn.z * 30.0 + wn.w * 18.0) * dens;
         albedo = vec3f(0.0);
         let perfused = smoothstep(0.0, 0.02, pf);
-        let pulse = 1.0 + u.params2.z * 3.0 * exp(-pow((pf - u.params2.y) / 0.05, 2.0)) * perfused;
-        // vessels the AI is regrowing inside the wound glow cyan-white; blood (perfusion) red
-        let fresh = smoothstep(0.3, 0.7, axs.g) * u.diag.w;
-        let vcol = mix(vec3f(1.6, 0.10, 0.18) * (0.15 + perfused) * pulse, vec3f(0.6, 1.4, 1.8) * (0.6 + 0.8 * perfused * pulse), fresh);
-        let starved = (1.0 - smoothstep(0.1, 0.5, supply)) * (wn.x + wn.y);
-        emit = wn.z * vcol * 2.0 + starved * vec3f(0.35, 0.3, 0.6) * 0.6
-             + wn.w * vec3f(0.25, 0.45, 1.6) * 1.4
-             + (wn.x + wn.y) * vec3f(0.12, 0.2, 0.32) * (0.15 + edge * 1.5) * 4.0;
+        let pulse = 1.0 + u.params2.z * 2.0 * exp(-pow((pf - u.params2.y) / 0.05, 2.0)) * perfused;
+        emit = (wn.x * u.types[0].rgb * 0.7 + wn.y * u.types[1].rgb * 0.8) * (0.2 + edge * 1.2)
+             + wn.z * u.types[2].rgb * (0.2 + perfused) * pulse * 3.0
+             + wn.w * u.types[3].rgb * 1.6
+             + wn.z * vec3f(1.6, 1.5, 1.2) * recPulse(p) * 4.0;
       } else if (mode < 3.5) {
         // ---------------- AI Brain: the hidden signals cells exchange, brightest where they change
         let hb = S2(p).yzw;                         // three hidden channels (tanh), chosen for the wound signal
@@ -378,6 +409,13 @@ fn march(uv: vec2f, maxDepth: f32) -> March {
         // ---------------- histology (outside the cut: dimmed tissue)
         let lam = 0.4 + 0.6 * max(dot(N, L), 0.0);
         albedo = mix(vec3f(0.85, 0.6, 0.72), vec3f(0.55, 0.35, 0.6), wn.z) * lam * 0.9;
+      }
+
+      if (mode < 0.5 && u.heal.x > 0.001) {
+        let les = smoothstep(0.3, 0.7, axs.g) * u.heal.x;
+        let tc = typeCol(wn);
+        albedo = mix(albedo, tc * (0.3 + 0.6 * max(dot(N, L), 0.0)), les * 0.75);
+        emit += tc * les * 0.15;
       }
 
       if (cf > 0.0) {
