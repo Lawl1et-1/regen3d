@@ -23,5 +23,10 @@
   "name": "lung",
   "label": "Lung",
   "n": 48
+ },
+ {
+  "name": "skin",
+  "label": "Skin",
+  "n": 48
  }
 ]

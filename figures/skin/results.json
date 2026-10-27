@@ -1,0 +1,244 @@
+{
+ "lesion_voxels": 843,
+ "lesion_fraction": 0.05198248751310353,
+ "final": {
+  "iteration": 1600,
+  "healthy": {
+   "iou": 0.9999383401159205,
+   "alive": 16218,
+   "acc_capsule": 1.0,
+   "acc_parenchyma": 1.0,
+   "acc_vessel": 1.0,
+   "acc_drain": NaN,
+   "function": 0.8295357932324434,
+   "fed_of_present": 0.8295357932324434,
+   "connectivity": 1.0,
+   "vessel_present": 1.0005763688760807,
+   "chamfer": 0.0004269641158800091,
+   "hausdorff": 1.0
+  },
+  "lesion": {
+   "iou": 0.9479590578369713,
+   "alive": 15375,
+   "acc_capsule": 0.9382352941176471,
+   "acc_parenchyma": 0.9480530522020064,
+   "acc_vessel": 0.9631123919308358,
+   "acc_drain": NaN,
+   "function": 0.7701921441931644,
+   "fed_of_present": 0.8123935073087616,
+   "connectivity": 0.9631123919308358,
+   "vessel_present": 0.9636887608069165
+  },
+  "repair": {
+   "10": {
+    "iou": 0.9804550218879092,
+    "alive": 15904,
+    "acc_capsule": 0.9694852941176471,
+    "acc_parenchyma": 0.974239074987247,
+    "acc_vessel": 0.9907780979827089,
+    "acc_drain": NaN,
+    "function": 0.7996089100493113,
+    "fed_of_present": 0.8200366204551399,
+    "connectivity": 0.9907780979827089,
+    "vessel_present": 1.03342939481268
+   },
+   "25": {
+    "iou": 0.9968037371688487,
+    "alive": 16269,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9935385138581874,
+    "acc_vessel": 0.9948126801152738,
+    "acc_drain": NaN,
+    "function": 0.8297058323414386,
+    "fed_of_present": 0.8322531127409176,
+    "connectivity": 0.9948126801152738,
+    "vessel_present": 1.0455331412103746
+   },
+   "50": {
+    "iou": 0.999075899457861,
+    "alive": 16232,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9923482400952219,
+    "acc_vessel": 0.9971181556195965,
+    "acc_drain": NaN,
+    "function": 0.8280054412514879,
+    "fed_of_present": 0.8333903816532603,
+    "connectivity": 0.9971181556195965,
+    "vessel_present": 1.0507204610951009
+   },
+   "100": {
+    "iou": 0.9996301547186094,
+    "alive": 16223,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9923482400952219,
+    "acc_vessel": 0.9982708933717579,
+    "acc_drain": NaN,
+    "function": 0.8258799523890494,
+    "fed_of_present": 0.8317492936039045,
+    "connectivity": 0.9982708933717579,
+    "vessel_present": 1.0512968299711816
+   },
+   "200": {
+    "iou": 0.9994453346480956,
+    "alive": 16226,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9926032987587146,
+    "acc_vessel": 0.9976945244956772,
+    "acc_drain": NaN,
+    "function": 0.8261350110525421,
+    "fed_of_present": 0.8316501198219788,
+    "connectivity": 0.9976945244956772,
+    "vessel_present": 1.048414985590778
+   },
+   "300": {
+    "iou": 0.9993221592309588,
+    "alive": 16228,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9926032987587146,
+    "acc_vessel": 0.9976945244956772,
+    "acc_drain": NaN,
+    "function": 0.8263050501615371,
+    "fed_of_present": 0.8318212940773707,
+    "connectivity": 0.9976945244956772,
+    "vessel_present": 1.0495677233429395
+   }
+  }
+ },
+ "checkpoints": [
+  {
+   "iteration": 128,
+   "healthy": {
+    "iou": 0.7414502560351134,
+    "alive": 21872,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 1.0,
+    "acc_vessel": 1.0,
+    "acc_drain": NaN,
+    "function": 0.923652440061214,
+    "fed_of_present": 0.6607468677776426,
+    "connectivity": 1.0,
+    "vessel_present": 1.061671469740634
+   },
+   "repaired": {
+    "iou": 0.3185612980533129,
+    "alive": 50907,
+    "acc_capsule": 0.9738970588235294,
+    "acc_parenchyma": 0.99379357252168,
+    "acc_vessel": 0.9769452449567724,
+    "acc_drain": NaN,
+    "function": 1.0618942356742052,
+    "fed_of_present": 0.3558505940340181,
+    "connectivity": 0.9769452449567724,
+    "vessel_present": 2.427665706051873
+   }
+  },
+  {
+   "iteration": 400,
+   "healthy": {
+    "iou": 0.9986452367756635,
+    "alive": 16239,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 1.0,
+    "acc_vessel": 1.0,
+    "acc_drain": NaN,
+    "function": 0.8295357932324434,
+    "fed_of_present": 0.8288311247026844,
+    "connectivity": 1.0,
+    "vessel_present": 1.0051873198847263
+   },
+   "repaired": {
+    "iou": 0.9758108189421746,
+    "alive": 16619,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9809556197925523,
+    "acc_vessel": 0.9994236311239193,
+    "acc_drain": NaN,
+    "function": 0.8373575922462166,
+    "fed_of_present": 0.8466431702914123,
+    "connectivity": 0.9994236311239193,
+    "vessel_present": 1.210951008645533
+   }
+  },
+  {
+   "iteration": 800,
+   "healthy": {
+    "iou": 0.9998150431565967,
+    "alive": 16220,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 1.0,
+    "acc_vessel": 1.0,
+    "acc_drain": NaN,
+    "function": 0.8295357932324434,
+    "fed_of_present": 0.8295357932324434,
+    "connectivity": 1.0,
+    "vessel_present": 1.001729106628242
+   },
+   "repaired": {
+    "iou": 0.9987681694998768,
+    "alive": 16235,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9886073796973304,
+    "acc_vessel": 0.9971181556195965,
+    "acc_drain": NaN,
+    "function": 0.8290256759054583,
+    "fed_of_present": 0.8377867514391271,
+    "connectivity": 0.9971181556195965,
+    "vessel_present": 1.0778097982708934
+   }
+  },
+  {
+   "iteration": 1200,
+   "healthy": {
+    "iou": 0.9997534060785401,
+    "alive": 16221,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 1.0,
+    "acc_vessel": 1.0,
+    "acc_drain": NaN,
+    "function": 0.8295357932324434,
+    "fed_of_present": 0.8295357932324434,
+    "connectivity": 1.0,
+    "vessel_present": 1.0023054755043228
+   },
+   "repaired": {
+    "iou": 0.9989528150794629,
+    "alive": 16234,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9942186702941677,
+    "acc_vessel": 0.9953890489913545,
+    "acc_drain": NaN,
+    "function": 0.8266451283795273,
+    "fed_of_present": 0.8303159692570452,
+    "connectivity": 0.9953890489913545,
+    "vessel_present": 1.0386167146974064
+   }
+  },
+  {
+   "iteration": 1600,
+   "healthy": {
+    "iou": 0.9999383401159205,
+    "alive": 16218,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 1.0,
+    "acc_vessel": 1.0,
+    "acc_drain": NaN,
+    "function": 0.8295357932324434,
+    "fed_of_present": 0.8295357932324434,
+    "connectivity": 1.0,
+    "vessel_present": 1.0005763688760807
+   },
+   "repaired": {
+    "iou": 0.9993221592309588,
+    "alive": 16228,
+    "acc_capsule": 1.0,
+    "acc_parenchyma": 0.9926032987587146,
+    "acc_vessel": 0.9976945244956772,
+    "acc_drain": NaN,
+    "function": 0.8263050501615371,
+    "fed_of_present": 0.8318212940773707,
+    "connectivity": 0.9976945244956772,
+    "vessel_present": 1.0495677233429395
+   }
+  }
+ ]
+}
