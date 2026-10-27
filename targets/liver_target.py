@@ -129,6 +129,8 @@ def build(seed: int = 11):
     labels, meta = finalize("liver", labels, hv, {})
     meta["world"] = dict(center=[float(c) for c in center], half=half)
     meta["source"] = "BodyParts3D liver surface (CC BY 4.0) + procedural vessels"
+    meta["types"] = [dict(name="capsule", color="#f2d27a"), dict(name="tissue", color="#d9705f"),
+                     dict(name="vessel tree", color="#ff2d48"), dict(name="central vein", color="#5b7cff")]
     return labels, meta
 
 

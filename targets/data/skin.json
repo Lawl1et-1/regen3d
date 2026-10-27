@@ -1,0 +1,57 @@
+{
+  "name": "skin",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    24,
+    25,
+    24
+  ],
+  "hilum": [
+    24,
+    14,
+    24
+  ],
+  "counts": {
+    "empty": 94375,
+    "capsule": 2720,
+    "parenchyma": 11762,
+    "vessel": 1735,
+    "drain": 0
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ],
+  "world": {
+    "center": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "half": 0.016
+  },
+  "mesh": "skin",
+  "source": "Procedural skin patch: epidermis, dermis, small-vessel network",
+  "types": [
+    {
+      "name": "epidermis",
+      "color": "#f7d9c4"
+    },
+    {
+      "name": "dermis",
+      "color": "#e08c84"
+    },
+    {
+      "name": "small vessels",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "(unused)",
+      "color": "#888888"
+    }
+  ]
+}

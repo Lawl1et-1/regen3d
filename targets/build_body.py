@@ -30,6 +30,8 @@ GROUPS = {
     "kidney_left": ["FMA7205"],
     "kidney_right": ["FMA7204"],
     "bronchi": ["FMA31739", "FMA7396", "FMA68418"],
+    "femur_right": ["FMA24474"],
+    "femur_left": ["FMA24475"],
     "stomach": ["FMA7148"],
     "spleen": ["FMA7196"],
     "pancreas": ["FMA7198"],
@@ -38,6 +40,7 @@ GROUPS = {
 }
 FACES = {"skin": 28000, "muscles": 45000, "liver": 12000, "heart": 10000,
          "kidney_left": 4000, "kidney_right": 4000, "lung_left": 8000, "lung_right": 8000,
+         "femur_right": 6000, "femur_left": 6000,
          "stomach": 8000, "spleen": 5000, "pancreas": 5000, "brain": 16000}
 
 

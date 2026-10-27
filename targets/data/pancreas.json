@@ -13,11 +13,11 @@
     24
   ],
   "counts": {
-    "empty": 106958,
-    "capsule": 1303,
-    "parenchyma": 1596,
-    "vessel": 571,
-    "drain": 164
+    "empty": 106957,
+    "capsule": 1306,
+    "parenchyma": 1563,
+    "vessel": 603,
+    "drain": 163
   },
   "labels": [
     "empty",
@@ -35,5 +35,23 @@
     "half": 0.06631855890154839
   },
   "mesh": "pancreas",
-  "source": "BodyParts3D pancreas (CC BY 4.0) + procedural vessels and pancreatic duct"
+  "source": "BodyParts3D pancreas (CC BY 4.0) + procedural vessels and pancreatic duct",
+  "types": [
+    {
+      "name": "capsule",
+      "color": "#f2d27a"
+    },
+    {
+      "name": "tissue",
+      "color": "#e8b07a"
+    },
+    {
+      "name": "vessels",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "pancreatic duct",
+      "color": "#7cf0c8"
+    }
+  ]
 }

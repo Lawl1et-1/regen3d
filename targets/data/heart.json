@@ -13,11 +13,11 @@
     24
   ],
   "counts": {
-    "empty": 91250,
-    "capsule": 8464,
-    "parenchyma": 7465,
-    "vessel": 2716,
-    "drain": 697
+    "empty": 91249,
+    "capsule": 8471,
+    "parenchyma": 7210,
+    "vessel": 2730,
+    "drain": 932
   },
   "labels": [
     "empty",
@@ -28,12 +28,30 @@
   ],
   "world": {
     "center": [
-      0.02225901000201702,
-      0.4429900646209717,
-      0.023114077746868134
+      0.02222062647342682,
+      0.4430471807718277,
+      0.023123441264033318
     ],
-    "half": 0.06377506088465452
+    "half": 0.06374321058392525
   },
   "mesh": "heart",
-  "source": "BodyParts3D heart walls (CC BY 4.0) + procedural coronary vessels"
+  "source": "BodyParts3D heart walls (CC BY 4.0) + procedural coronary vessels",
+  "types": [
+    {
+      "name": "epicardium",
+      "color": "#f2d27a"
+    },
+    {
+      "name": "muscle wall",
+      "color": "#e0485a"
+    },
+    {
+      "name": "coronary arteries",
+      "color": "#ff9a3c"
+    },
+    {
+      "name": "coronary veins",
+      "color": "#5b7cff"
+    }
+  ]
 }

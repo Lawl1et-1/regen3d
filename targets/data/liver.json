@@ -3,21 +3,21 @@
   "n": 48,
   "channels": 16,
   "seed": [
-    19,
-    29,
-    25
+    16,
+    27,
+    24
   ],
   "hilum": [
     21,
-    24,
+    22,
     21
   ],
   "counts": {
-    "empty": 100279,
-    "capsule": 2430,
-    "parenchyma": 5919,
-    "vessel": 1560,
-    "drain": 404
+    "empty": 97053,
+    "capsule": 3379,
+    "parenchyma": 7848,
+    "vessel": 1712,
+    "drain": 600
   },
   "labels": [
     "empty",
@@ -28,11 +28,29 @@
   ],
   "world": {
     "center": [
-      -0.011466700583696365,
-      0.3128013610839844,
-      0.02249310538172722
+      -0.011406335979700089,
+      0.323481522500515,
+      0.02251049317419529
     ],
-    "half": 0.13168660402297974
+    "half": 0.11433213837444783
   },
-  "source": "BodyParts3D liver surface (CC BY 4.0) + procedural vessels"
+  "source": "BodyParts3D liver surface (CC BY 4.0) + procedural vessels",
+  "types": [
+    {
+      "name": "capsule",
+      "color": "#f2d27a"
+    },
+    {
+      "name": "tissue",
+      "color": "#d9705f"
+    },
+    {
+      "name": "vessel tree",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "central vein",
+      "color": "#5b7cff"
+    }
+  ]
 }

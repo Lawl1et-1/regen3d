@@ -13,11 +13,11 @@
     23
   ],
   "counts": {
-    "empty": 98669,
-    "capsule": 2580,
-    "parenchyma": 7158,
-    "vessel": 1692,
-    "drain": 493
+    "empty": 98662,
+    "capsule": 2582,
+    "parenchyma": 7060,
+    "vessel": 1803,
+    "drain": 485
   },
   "labels": [
     "empty",
@@ -35,5 +35,23 @@
     "half": 0.052286244556307794
   },
   "mesh": "spleen",
-  "source": "BodyParts3D spleen (CC BY 4.0) + procedural splenic vessels"
+  "source": "BodyParts3D spleen (CC BY 4.0) + procedural splenic vessels",
+  "types": [
+    {
+      "name": "capsule",
+      "color": "#f2d27a"
+    },
+    {
+      "name": "pulp",
+      "color": "#b8405e"
+    },
+    {
+      "name": "vessels",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "veins",
+      "color": "#5b7cff"
+    }
+  ]
 }
