@@ -85,12 +85,12 @@ export class AnalysisPanel {
       ${verdict}
       ${reasons}
       <dl class="ai-stats">
-        <dt>Healing potential</dt><dd>${e.label}<small>${whole(e.min)}–${whole(e.max)} over ${ROLLOUTS} simulated repairs</small></dd>
+        <dt>Healing potential</dt><dd>${e.label}<small>mean of ${ROLLOUTS} simulated repairs, rounded</small></dd>
         <dt>Tissue rebuilt</dt><dd>${whole(e.tissue)}<small>of the removed volume, right cell types</small></dd>
         <dt>Vascular recovery</dt>${e.vessels === null
           ? '<dd>—<small>no blood flow cut beyond the wound</small></dd>'
           : `<dd>${whole(e.vessels)}<small>of the vessels cut off from blood (${small(c.flowLost)} of the supply)</small></dd>`}
-        <dt>Residual damage</dt><dd>${small(e.residual)} of organ<small>uninjured tissue starving: ${small(e.impairment)}</small></dd>
+        <dt>Residual damage</dt><dd>${small(e.residual)} of organ<small>not back to its healthy state · uninjured tissue starving: ${small(e.impairment)}</small></dd>
         <dt>Model uncertainty</dt><dd class="unc ${e.uncertainty}">${unc}<small>${e.uncertaintyWhy.join('; ')}</small></dd>
         <dt>Injury</dt><dd>${small(c.share)} of tissue<small>${Math.max(1, Math.round(c.depthVoxels * mm))} mm deep · ${small(c.flowLost)} of blood flow cut</small></dd>
         ${r.repairable
@@ -99,9 +99,10 @@ export class AnalysisPanel {
       </dl>
       <div class="rolls">${dots}</div>
       ${legend}
-      <p class="ai-note">Healing potential = tissue rebuilt × blood supply restored × uninjured tissue still fed,
-        averaged over ${ROLLOUTS} simulated repairs of this injury. A heuristic score of the simulation, rounded to what
-        it supports: not a medical or calibrated probability.</p>`;
+      <p class="ai-note">Healing potential = tissue rebuilt × blood supply restored × uninjured tissue still fed × organ
+        back to its healthy state, averaged over ${ROLLOUTS} simulated repairs of this injury. A heuristic score of the
+        simulation, rounded to what it supports: not a medical or calibrated probability. Repairable: the simulated
+        repairs regrow at least 80% of the wound and restore at least 80% of its blood supply.</p>`;
     this.el.classList.add('show');
   }
 }

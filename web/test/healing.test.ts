@@ -216,6 +216,13 @@ for (const organ of ['liver', 'kidney']) {
     const hs = [0.7, 0.75, 0.8].map((f) => dp.score(partial(o, dp.injured, deep, f)).potential);
     for (let i = 1; i < hs.length; i++) assert.ok(Math.abs(hs[i] - hs[i - 1]) < 0.25, hs.join(', '));
   });
+  check('verdict: no repair is not repairable, a full repair is, independently of the score', () => {
+    const none = dp.score(dp.injured), full = dp.score(o.labels), sevTissue = sev.score(partial(o, sev.injured, sv, 1, 2));
+    assert.equal(estimate(dp.ctx, Array(8).fill(none)).repairable, false);
+    assert.equal(estimate(dp.ctx, Array(8).fill(full)).repairable, true);
+    // wound regrown but the severed trunk never reconnected: blood supply not restored
+    assert.equal(estimate(sev.ctx, Array(8).fill(sevTissue)).repairable, sev.ctx.flowLost < 0.2);
+  });
   check('uncertain predictions: half the repairs fail -> mid score, high uncertainty, shown as a range', () => {
     const full = dp.score(o.labels), none = dp.score(dp.injured);
     const e = estimate(dp.ctx, [full, full, full, full, none, none, none, none]);

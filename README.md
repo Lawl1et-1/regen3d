@@ -97,12 +97,14 @@ at 94% shape before any repair, which the first version of this score counted as
 | **V** vascular recovery | share of the vessels beyond the wound that the injury cut off from the hilum and that have blood again | measured |
 | **F** blood supply restored | 1 − (share of the tree cut off) × (1 − V): a severed trunk feeding 20% of the tree costs 20%, a twig almost nothing | measured |
 | **I** collateral impairment | share of the *uninjured* functional tissue that ends up without enough nutrient (the simulation's own growth threshold) | measured |
-| **D** residual damage | voxels of the organ not back to their healthy type, plus overgrowth (shown, not scored) | measured |
+| **D** residual damage | share of the organ not back to its healthy type, plus overgrowth; 1 − D is its structural integrity | measured |
 
-Per run, **H = T × F × (1 − I)**; the healing potential is the mean of H over the 8 runs. The
-three factors cover separate parts of the organ (the wound, the vessel tree beyond it, the
-uninjured tissue), so no damage is counted twice; an unrepaired wound scores 0, and rebuilding
-25% of a wound can never score above 25%.
+Per run, **H = T × F × (1 − I) × (1 − D)**; the healing potential is the mean of H over the 8
+runs. An unrepaired wound scores 0, and rebuilding 25% of a wound can never score above 25%.
+T is relative to the wound (how *well* it is rebuilt) while 1 − D is relative to the organ (how
+*much* of it is still wrong): they overlap on purpose, so the same quality of repair weighs more
+on a larger injury. The other factors cover separate parts of the organ (the vessel tree beyond
+the wound, the uninjured tissue).
 
 What the percentage means: *the share of the healthy state that the trained model restores for
 this injury, in its own simulated world.* The terms are measured; combining them as a product
@@ -117,11 +119,19 @@ within 5 points and the injury is within what the model saw in training; *modera
 15-point spread or when the injury reaches the hilum; *high* beyond that, or when the injury is
 larger than any in training (> 25% of the organ). The score is rounded to 5 points, or shown as a
 10-point range when uncertainty is high: 8 runs of one model do not support finer numbers.
-*REPAIRABLE* (the live repair runs) means a potential of at least 50%, an arbitrary cut-off.
+
+*REPAIRABLE* (the live repair runs) answers a separate question, so it does not flip with small
+changes of the score: in the median simulated repair, at least 80% of the wound regrows (any cell
+type) and at least 80% of the blood supply it cut comes back. Both cut-offs are heuristic.
+
+What the trained models show with this score: they close wounds and reconnect vessels reliably,
+but rebuild only about half of a wound with the right cell types, leaving extra vessel, a
+capsule-like scar and a small bulge where the wound was. A puncture or a short cut on the liver
+scores about 50–55%; the old whole-organ score called the same repairs 99%.
 
 `npm test` (in `web/`) checks the score on the real liver and kidney grids: no injury, a small
 superficial cut (repaired and not), a deep cut rebuilt 0–100%, a severed main vessel (reconnected
-and not), overgrowth, and disagreeing runs.
+and not), overgrowth, disagreeing runs, and the verdict.
 
 ### In the browser
 Vite + TypeScript. Three.js draws the body; the organ volume, the cellular automaton, the

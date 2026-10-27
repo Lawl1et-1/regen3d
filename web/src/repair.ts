@@ -69,7 +69,8 @@ export class RepairTracker {
 
   outcome(): RepairOutcome {
     const last = this.samples[this.samples.length - 1];
-    const healed = this.samples.find((x) => x.iou >= last.iou * 0.98) ?? last;
+    // same rule as the forecast: the wound refilled to 98% of where it ends up
+    const healed = this.samples.find((x) => x.fill >= last.fill * 0.98) ?? last;
     return { shape: last.iou, vessels: last.connectivity, healedAt: healed.step, steps: last.step };
   }
 }

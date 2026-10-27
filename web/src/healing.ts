@@ -1,25 +1,26 @@
 // Simulated healing potential: how well the trained model repairs one specific injury,
 // measured on the injury itself rather than on the whole organ.
 //
-// Every term is measured from a simulated repair against the healthy organ, and each one
-// covers a different part of the organ, so none counts the same damage twice:
-//   T  tissue reconstruction  the wound: its voxels back with the correct cell type,
-//                             / (wound + tissue overgrowing the healthy shape around it)
-//   V  vascular recovery      the vessel tree beyond the wound: share of the vessels the injury
-//                             cut off from blood that have it again (the wound's own vessel
-//                             voxels are part of T)
+// Every term is measured from a simulated repair against the healthy organ:
+//   T  tissue reconstruction  quality of the wound repair: its voxels back with the correct cell
+//                             type / (wound + tissue overgrowing the healthy shape around it)
+//   V  vascular recovery      share of the vessels beyond the wound that the injury cut off from
+//                             blood and that have it again (the wound's own vessels are part of T)
 //   F  blood flow restored    1 - flowCut * (1 - V): the blood supply still missing at the end.
 //                             Cutting a trunk that fed 20% of the tree and never reconnecting it
 //                             costs 20%, a twig almost nothing: essential vessels weigh more.
 //   I  collateral impairment  uninjured functional tissue that ends up without enough blood
-//   D  residual damage        voxels of the organ not back to their healthy type (+ overgrowth),
-//                             shown, not scored
-// Per simulated repair:  H = T * F * (1 - I)
-// The product is the heuristic part (equal weights, nothing fitted): an unrepaired wound gives
-// 0, rebuilding 25% of a wound can never score above 25%, and lost blood supply or starving
-// healthy tissue scale it down. There are no real healing outcomes to calibrate against, so H
-// is a simulated healing potential, not a medical or calibrated probability. Uncertainty is
-// reported separately, never folded in.
+//   D  residual damage        voxels of the organ not back to their healthy type (+ overgrowth)
+// Per simulated repair:  H = T * F * (1 - I) * (1 - D)
+// T is relative to the wound (how well it is rebuilt), 1 - D is the organ's structural integrity
+// (how much of it is still wrong): they overlap on purpose, so the same quality of repair weighs
+// more on a larger injury. The product is the heuristic part (equal weights, nothing fitted): an
+// unrepaired wound gives 0 and rebuilding 25% of a wound can never score above 25%. There are no
+// real healing outcomes to calibrate against, so H is a simulated healing potential, not a
+// medical or calibrated probability. Uncertainty is reported separately, never folded in.
+//
+// The REPAIRABLE verdict answers another question (does the simulated repair close the wound and
+// bring blood back?) with its own cut-offs, so it does not flip with small changes of H.
 import { NUTRIENT_OK, type MetricsEngine } from './metrics';
 
 /** Injuries larger than this share of the organ are beyond those seen in training. */
@@ -27,6 +28,9 @@ export const TRAINED_MAX_SHARE = 0.25;
 /** Fewer lost vessel voxels than this: no vessel was really cut, V does not apply. */
 const MIN_LOST_VESSELS = 6;
 const OVERGROWTH_RADIUS = 2;
+/** Verdict cut-offs (heuristic): the wound regrows (any cell type) and blood comes back. */
+export const REFILL_OK = 0.8;
+export const FLOW_OK = 0.8;
 
 export interface HealingContext {
   n: number;
@@ -54,6 +58,9 @@ export interface OutcomeScore {
   vessels: number | null;
   impairment: number;
   residual: number;
+  /** share of the wound regrown with any tissue, and blood supply restored (for the verdict) */
+  refilled: number;
+  flow: number;
   potential: number;
 }
 
@@ -68,6 +75,10 @@ export interface HealingEstimate {
   vessels: number | null;
   impairment: number;
   residual: number;
+  refilled: number;
+  flow: number;
+  /** the simulated repairs close the wound and bring blood back (REFILL_OK, FLOW_OK) */
+  repairable: boolean;
   uncertainty: UncertaintyLevel;
   uncertaintyWhy: string[];
   /** display text, rounded to what the evidence supports */
@@ -129,11 +140,11 @@ export function healingContext(metrics: MetricsEngine, healthy: Uint32Array, inj
 export function scoreOutcome(ctx: HealingContext, metrics: MetricsEngine, sum: Uint32Array): OutcomeScore {
   metrics.compute(sum);
   const nv = sum.length;
-  if (!ctx.lesionCount) return { tissue: 1, vessels: null, impairment: 0, residual: 0, potential: 1 };
-  let correct = 0, over = 0, wrong = 0;
+  if (!ctx.lesionCount) return { tissue: 1, vessels: null, impairment: 0, residual: 0, refilled: 1, flow: 1, potential: 1 };
+  let correct = 0, over = 0, wrong = 0, alive = 0;
   for (let i = 0; i < nv; i++) {
     const c = sum[i] & 0xff, h = ctx.healthy[i] & 0xff;
-    if (ctx.lesion[i] && c === h) correct++;
+    if (ctx.lesion[i] && c) { alive++; if (c === h) correct++; }
     if (ctx.overgrowthZone[i] && c) over++;
     if (h && c !== h) wrong++;
     else if (!h && c && ctx.overgrowthZone[i]) wrong++;
@@ -148,8 +159,8 @@ export function scoreOutcome(ctx: HealingContext, metrics: MetricsEngine, sum: U
   const impairment = ctx.fedOutside > 0 ? clamp01((ctx.fedOutside - countFedOutside(sum, ctx.lesion)) / ctx.fedOutside) : 0;
   const residual = wrong / Math.max(1, ctx.organVoxels);
   const flow = 1 - ctx.flowLost * (1 - (vessels ?? 1));
-  const potential = tissue * flow * (1 - impairment);
-  return { tissue, vessels, impairment, residual, potential };
+  const potential = tissue * flow * (1 - impairment) * (1 - residual);
+  return { tissue, vessels, impairment, residual, refilled: alive / ctx.lesionCount, flow, potential };
 }
 
 /** Combine the simulated repairs: mean potential, component medians, and a separate uncertainty. */
@@ -159,8 +170,9 @@ export function estimate(ctx: HealingContext, scores: OutcomeScore[]): HealingEs
   const min = Math.min(...hs), max = Math.max(...hs);
   const spread = max - min;
   const why: string[] = [];
-  if (spread >= 0.05) why.push(`the simulated repairs end ${Math.round(spread * 100)} points apart`);
-  else why.push(`the simulated repairs agree within ${Math.max(1, Math.round(spread * 100))} points`);
+  const pts = Math.max(1, Math.round(spread * 100));
+  if (spread >= 0.05) why.push(`the simulated repairs end ${pts} points apart`);
+  else why.push(`the simulated repairs agree within ${pts} point${pts > 1 ? 's' : ''}`);
   const outside = ctx.share > TRAINED_MAX_SHARE;
   if (outside) why.push(`the injury (${Math.round(ctx.share * 100)}% of the organ) is larger than any seen in training`);
   if (ctx.hilumHit) why.push('the injury reaches the hilum, where the vessels enter');
@@ -179,6 +191,9 @@ export function estimate(ctx: HealingContext, scores: OutcomeScore[]): HealingEs
     vessels: vs.length ? median(vs) : null,
     impairment: median(scores.map((s) => s.impairment)),
     residual: median(scores.map((s) => s.residual)),
+    refilled: median(scores.map((s) => s.refilled)),
+    flow: median(scores.map((s) => s.flow)),
+    repairable: median(scores.map((s) => s.refilled)) >= REFILL_OK && median(scores.map((s) => s.flow)) >= FLOW_OK,
     uncertainty, uncertaintyWhy: why, label,
   };
 }
@@ -192,6 +207,7 @@ export function shortfalls(ctx: HealingContext, e: HealingEstimate): string[] {
       ? `The injury reaches the hilum: only ${Math.round(e.vessels * 100)}% of the vessels that lost blood flow reconnect.`
       : `Only ${Math.round(e.vessels * 100)}% of the vessels that lost blood flow reconnect.` });
   }
+  if (e.residual > 0.05) out.push({ v: e.residual, text: `${Math.round(e.residual * 100)}% of the organ is still not back to its healthy state.` });
   if (e.impairment > 0.1) out.push({ v: e.impairment, text: `${Math.round(e.impairment * 100)}% of the uninjured functional tissue ends up without enough blood.` });
   return out.sort((a, b) => b.v - a.v).slice(0, 2).map((o) => o.text);
 }

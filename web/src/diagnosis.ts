@@ -6,23 +6,22 @@
 import type { Metrics, MetricsEngine } from './metrics';
 import type { Simulation } from './sim';
 import { runWithBlood } from './blood';
-import { dilate, estimate, healingContext, scoreOutcome, shortfalls, type HealingContext, type HealingEstimate, type OutcomeScore } from './healing';
+import { dilate, estimate, FLOW_OK, REFILL_OK, healingContext, scoreOutcome, shortfalls, type HealingContext, type HealingEstimate, type OutcomeScore } from './healing';
 
 export const ROLLOUTS = 8;
 export const ROLLOUT_STEPS = 120;
-/** Healing potential from which the repair is attempted live (a heuristic cut-off, not a probability). */
-export const REPAIR_THRESHOLD = 0.5;
 /** Live repair speed: slow while the wound closes so the phases can be followed, then faster. */
 export const liveStepsPerSec = (step: number) => (step < 24 ? 2.5 : 8);
 /** Seconds the live repair takes to reach `steps`. */
 export const liveSeconds = (steps: number) => Math.min(steps, 24) / 2.5 + Math.max(0, steps - 24) / 8;
 
 export interface RolloutResult {
-  /** healing potential of this simulated repair >= REPAIR_THRESHOLD */
+  /** this simulated repair closes the wound and brings blood back (healing.ts REFILL_OK, FLOW_OK) */
   success: boolean;
   score: OutcomeScore;
   final: Metrics;
-  curve: { step: number; iou: number }[];
+  /** whole-organ shape and share of the wound refilled, per measurement */
+  curve: { step: number; iou: number; fill: number }[];
   healedAt: number;
 }
 
@@ -82,6 +81,7 @@ export class Diagnosis {
     let lesion: Uint8Array | null = null;
     let postCut: Uint32Array | null = null;
     let ctx: HealingContext | null = null;
+    let lesionIdx = new Int32Array(0);
 
     for (let k = 0; k < ROLLOUTS; k++) {
       // fresh copy of the lesioned organ (with its blood supply), with its own random stream
@@ -91,23 +91,29 @@ export class Diagnosis {
       this.fc.blood = this.main.blood;
       this.fc.writeParams(7919 * (k + 1));
       this.fc.setStepIndex(100000 * (k + 1));
-      const curve: { step: number; iou: number }[] = [];
+      const curve: { step: number; iou: number; fill: number }[] = [];
       const end = { m: null as Metrics | null, sum: null as Uint32Array | null };
       await runWithBlood(this.device, this.fc, this.metrics, ROLLOUT_STEPS, (s, sum, m) => {
         end.m = m;
         end.sum = sum;
-        curve.push({ step: s, iou: m.iou });
         if (k === 0 && s === 0) {
           postCut = sum;
           lesion = new Uint8Array(nv);
-          for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) lesion[i] = 1;
+          const idx: number[] = [];
+          for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) { lesion[i] = 1; idx.push(i); }
+          lesionIdx = new Int32Array(idx);
         }
+        let filled = 0;
+        for (const i of lesionIdx) if (sum[i] & 0xff) filled++;
+        curve.push({ step: s, iou: m.iou, fill: lesionIdx.length ? filled / lesionIdx.length : 1 });
       }, () => token === this.token);
       if (token !== this.token) return;
       const final = end.m!;
       const lastSum = end.sum!;
-      // the rollout is healed once it reaches 98% of where it ends up
-      const healedAt = curve.find((c) => c.iou >= final.iou * 0.98)?.step ?? ROLLOUT_STEPS;
+      // healed once the wound is refilled to 98% of where it ends up (the whole organ's shape
+      // barely moves for a small wound, so it cannot time the repair)
+      const endFill = curve[curve.length - 1].fill;
+      const healedAt = curve.find((c) => c.fill >= endFill * 0.98)?.step ?? ROLLOUT_STEPS;
       const perf = this.metrics.perfusion;
       for (let i = 0; i < nv; i++) {
         if (lastSum[i] & 0xff) alive[i]++;
@@ -116,7 +122,7 @@ export class Diagnosis {
       // score this simulated repair on the lesion (the BFS runs again, so after reading the perfusion)
       ctx ??= healingContext(this.metrics, healthy, postCut ?? healthy, this.hilum);
       const score = scoreOutcome(ctx, this.metrics, lastSum);
-      const success = score.potential >= REPAIR_THRESHOLD;
+      const success = score.refilled >= REFILL_OK && score.flow >= FLOW_OK;
       this.progress.rollouts.push({ success, score, final, curve, healedAt });
       this.progress.done = k + 1;
       this.onProgress?.(this.progress);
@@ -125,7 +131,7 @@ export class Diagnosis {
     // ------------------------------------------------------------ aggregate
     const R = this.progress.rollouts;
     const healing = estimate(ctx!, R.map((r) => r.score));
-    const repairable = healing.potential >= REPAIR_THRESHOLD;
+    const repairable = healing.repairable;
     const med = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return (s[(s.length - 1) >> 1] + s[s.length >> 1]) / 2; };
     const shape = med(R.map((r) => r.final.iou));
     const vessels = med(R.map((r) => r.final.connectivity));
