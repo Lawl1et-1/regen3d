@@ -28,5 +28,10 @@
   "name": "skin",
   "label": "Skin",
   "n": 48
+ },
+ {
+  "name": "stomach",
+  "label": "Stomach",
+  "n": 48
  }
 ]
