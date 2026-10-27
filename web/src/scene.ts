@@ -1,5 +1,6 @@
 // A loaded organ: kernels, the live simulation, metrics readback and history.
 import { MetricsEngine, type Metrics } from './metrics';
+import { ReconnectPulses } from './reconnect';
 import { loadOrgan, SimKernels, Simulation, type Organ } from './sim';
 
 export const STEPS_PER_SEC = 30; // 1x speed
@@ -9,6 +10,7 @@ export interface Sample { step: number; t: number; m: Metrics }
 export class Scene {
   readonly sim: Simulation;
   readonly metrics: MetricsEngine;
+  readonly pulses: ReconnectPulses;
   latest: Metrics | null = null;
   latestSummary: Uint32Array | null = null;
   history: Sample[] = [];
@@ -25,6 +27,7 @@ export class Scene {
   private constructor(readonly device: GPUDevice, readonly organ: Organ, readonly kernels: SimKernels) {
     this.sim = new Simulation(kernels, organ.meta.name);
     this.metrics = new MetricsEngine(organ);
+    this.pulses = new ReconnectPulses(this.metrics);
   }
 
   static async load(device: GPUDevice, name: string) {
@@ -90,6 +93,7 @@ export class Scene {
       const sum = await read();
       this.reading = false;
       const m = this.metrics.compute(sum);
+      this.pulses.update(sum, time);
       this.sim.uploadPerfusion(this.metrics.perfusion);
       this.latest = m;
       this.latestSummary = sum;

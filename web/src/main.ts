@@ -128,9 +128,13 @@ const brainNote = h('div', { class: 'brain-note glass' },
   '<b>AI Brain</b>Each cell carries 11 hidden numbers that no one designed: the network invented them to talk to its neighbours. '
   + 'Colours show three of them; brightness shows where they are changing. Cut the organ and watch the signal spread from the wound.');
 ui.appendChild(brainNote);
-const vesselNote = h('div', { class: 'brain-note glass' },
-  '<b>Vessels</b>Tissue only grows where blood reaches it. Red: vessels connected to the hilum, with blood pulses flowing out. '
-  + 'Cyan: vessels the AI is regrowing in the wound. Pale tissue is starving: it regrows only once a vessel reaches it, and dies if none does.');
+const vesselNote = h('div', { class: 'brain-note glass' });
+function xrayNote() {
+  const legend = (stage?.types ?? []).slice(0, 4).filter((t) => !t.name.startsWith('('))
+    .map((t) => `<li><i style="background:${t.color}"></i>${t.name}</li>`).join('');
+  vesselNote.innerHTML = '<b>X-ray</b>Each cell type in its own colour. Vessels light up where blood reaches them, '
+    + 'and a pulse runs along a vessel the moment it reconnects.' + `<ul class="legend">${legend}</ul>`;
+}
 ui.appendChild(vesselNote);
 
 const label = h('div', { class: 'organ-label' });
@@ -143,7 +147,7 @@ const analysis = new AnalysisPanel(ui);
 
 // repair phases, bottom of the screen (each one lights up when the simulation reaches it)
 const phases = h('div', { class: 'phases glass' });
-phases.innerHTML = `<ol>${PHASES.map((p, i) => `<li data-i="${i}"><span class="pdot"></span>${p}</li>`).join('<li class="pline" aria-hidden="true"></li>')}</ol><div class="pwhy"></div><div class="pstat"></div>`;
+phases.innerHTML = `<ol>${PHASES.map((p, i) => `<li data-i="${i}"><span class="pdot"></span>${p}</li>`).join('<li class="pline" aria-hidden="true"></li>')}</ol><div class="pwhy"></div><div class="ptypes"></div><div class="pstat"></div>`;
 ui.appendChild(phases);
 /** What happens in each phase (shown under the timeline while it is active). */
 const PHASE_WHY = [
@@ -162,6 +166,19 @@ function showPhases(st: RepairState | null) {
     li.classList.toggle('active', !st.finished && i === st.active);
   });
   const sm = st.sample;
+  // what the AI rebuilds, in its own colour, numbered in the order each cell type is completed
+  const types = stage?.types ?? [];
+  const present = [0, 1, 2, 3].filter((k) => st.types.share[k] !== null);
+  present.sort((a, b) => {
+    const ia = st.types.order.indexOf(a), ib = st.types.order.indexOf(b);
+    if (ia >= 0 || ib >= 0) return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib);
+    return st.types.share[b]! - st.types.share[a]!;
+  });
+  phases.querySelector('.ptypes')!.innerHTML = present.map((k) => {
+    const rank = st.types.order.indexOf(k);
+    const t = types[k] ?? { name: `type ${k + 1}`, color: '#888' };
+    return `<span class="tchip${rank >= 0 ? ' done' : ''}"><i style="background:${t.color}"></i>${rank >= 0 ? `<b>${rank + 1}</b>` : ''}${t.name} ${(st.types.share[k]! * 100).toFixed(0)}%</span>`;
+  }).join('');
   phases.querySelector('.pwhy')!.textContent = st.finished ? '' : PHASE_WHY[st.active] ?? '';
   phases.querySelector('.pstat')!.textContent = st.finished
     ? `Repair complete · ${st.step} steps · shape ${(sm.iou * 100).toFixed(1)}% · vessels ${(sm.connectivity * 100).toFixed(1)}%`
@@ -180,6 +197,7 @@ function select(id: OrganId) {
   stageOrgan = null;
   stage?.setBrain(false);
   stage?.setVessels(false);
+  stage?.setSection(false);
   brainNote.classList.remove('show');
   vesselNote.classList.remove('show');
   label.classList.remove('show');
@@ -211,18 +229,30 @@ function select(id: OrganId) {
     const reset = h('button', { class: 'pill' }, 'Reset organ');
     reset.onclick = () => { closeView(); stage?.reset(); setCutInfo(null); analysis.hide(); showPhases(null); enableProofs(); };
     const brain = h('button', { class: 'pill brain', 'aria-pressed': 'false' }, '<span class="dot"></span>AI Brain');
-    const vessels = h('button', { class: 'pill', 'aria-pressed': 'false' }, '<span class="dot"></span>Vessels');
+    const vessels = h('button', { class: 'pill', 'aria-pressed': 'false' }, '<span class="dot"></span>X-ray');
+    const section = h('button', { class: 'pill', 'aria-pressed': 'false' }, '<span class="dot"></span>Cross-section');
+    const depth = h('label', { class: 'tool-size' }, 'Depth <input type="range" min="0" max="1" step="0.01" value="0.5" aria-label="Cross-section depth">');
+    const depthInput = depth.querySelector('input')!;
+    depthInput.oninput = () => stage?.setSection(true, +depthInput.value);
+    section.onclick = () => {
+      const on = !stage?.section.on;
+      stage?.setSection(on, +depthInput.value);
+      section.classList.toggle('on', on);
+      section.setAttribute('aria-pressed', String(on));
+      depth.classList.toggle('show', on);
+    };
     const syncViews = () => {
       for (const [b, on] of [[brain, !!stage?.brain], [vessels, !!stage?.vessels]] as const) {
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', String(on));
       }
       brainNote.classList.toggle('show', !!stage?.brain);
+      if (stage?.vessels) xrayNote();
       vesselNote.classList.toggle('show', !!stage?.vessels);
     };
     brain.onclick = () => { stage?.setBrain(!stage.brain); syncViews(); };
     vessels.onclick = () => { stage?.setVessels(!stage.vessels); syncViews(); };
-    actions.append(vessels, brain);
+    actions.append(vessels, brain, section, depth);
     const noAi = h('button', { class: 'pill', id: 'btn-noai', disabled: '' }, 'Without AI');
     noAi.onclick = () => openView('compare');
     const learn = h('button', { class: 'pill', id: 'btn-learn', disabled: '' }, 'Watch the AI learn');

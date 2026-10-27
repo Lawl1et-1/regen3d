@@ -27,7 +27,8 @@ export class MetricsEngine {
   readonly hilum: Int32Array;
   readonly maxDist: number;
   readonly targetSeal: number;
-  private dist: Int32Array;
+  /** BFS distance from the hilum of every vessel voxel (-1 = no blood) */
+  readonly dist: Int32Array;
   private queue: Int32Array;
   readonly perfusion: Uint8Array<ArrayBuffer>;
   private neighbors: Int32Array;
@@ -38,7 +39,7 @@ export class MetricsEngine {
     for (const v of this.target) this.targetCounts[v]++;
     this.dist = new Int32Array(n * n * n);
     this.queue = new Int32Array(n * n * n);
-    this.perfusion = new Uint8Array(n * n * n);
+    this.perfusion = new Uint8Array(n * n * n * 4);
     const nb: number[] = [];
     for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (dx || dy || dz) nb.push(dx, dy, dz);
@@ -119,7 +120,8 @@ export class MetricsEngine {
     const perf = this.perfusion, dist = this.dist, md = this.maxDist;
     for (let i = 0; i < sum.length; i++) {
       const d = dist[i];
-      if (d >= 0) { if (this.target[i] === 3) conn++; perf[i] = 1 + Math.min(254, Math.round((d / md) * 220)); } else perf[i] = 0;
+      if (d >= 0) { if (this.target[i] === 3) conn++; perf[4 * i] = 1 + Math.min(254, Math.round((d / md) * 220)); } else perf[4 * i] = 0;
+      perf[4 * i + 1] = 0; perf[4 * i + 2] = 0;
     }
     const tc = this.targetCounts;
     return {

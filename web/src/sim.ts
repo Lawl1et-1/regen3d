@@ -29,6 +29,8 @@ export interface OrganMeta {
   brain_channels?: [number, number, number];
   /** training iterations of the saved checkpoints (organs/<name>.ckpt_<it>.json) */
   checkpoints?: number[];
+  /** the organ's cell types (labels 1..4): name and colour */
+  types?: { name: string; color: string }[];
 }
 
 export interface Organ {
@@ -208,8 +210,9 @@ export class Simulation {
       size: [n, n, n], dimension: '3d', format: 'rgba8unorm',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
+    // r: perfusion (BFS distance from the hilum), g/b: reconnection pulse (see reconnect.ts)
     this.perfTex = d.createTexture({
-      size: [n, n, n], dimension: '3d', format: 'r8unorm',
+      size: [n, n, n], dimension: '3d', format: 'rgba8unorm',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
     });
 
@@ -415,7 +418,7 @@ export class Simulation {
 
   uploadPerfusion(data: Uint8Array<ArrayBuffer>) {
     const n = this.n;
-    this.k.device.queue.writeTexture({ texture: this.perfTex }, data, { bytesPerRow: n, rowsPerImage: n }, [n, n, n]);
+    this.k.device.queue.writeTexture({ texture: this.perfTex }, data, { bytesPerRow: n * 4, rowsPerImage: n }, [n, n, n]);
   }
 
   /** Read the full state (for snapshots / replays). */
