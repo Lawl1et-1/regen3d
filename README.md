@@ -13,10 +13,14 @@ tissue live: vessels first, then the tissue they feed.
 
 1. **Explore the body.** Rotate and zoom a 3D human body built from real anatomical meshes.
    *X-ray* fades skin and muscles so only the glowing organs remain.
-2. **Pick an organ.** Liver, heart, kidneys, lungs, stomach, spleen, pancreas, brain. The camera
-   zooms in and the organ becomes a living volume on the GPU.
-3. **Make a lesion.** Swipe across it: a glowing blade trail cuts an incision whose depth follows
-   the speed of the gesture. The cut shows a clean, stylised cross-section (no blood).
+2. **Pick an organ.** Liver, heart, kidneys, lungs, stomach, spleen, pancreas, brain, the hip end
+   of the femur, or a patch of skin anywhere on the body. The camera zooms in and the organ becomes
+   a living volume on the GPU.
+3. **Make a lesion.**
+   - **Swipe** (the main one): a glowing blade trail cuts an incision whose depth follows the speed
+     of the gesture. The cut shows a clean, stylised cross-section (no blood).
+   - **Puncture**: click to punch a spherical hole; a slider sets its size.
+   - **Burn**: press and hold; the damage spreads from that point until you release.
 4. **Read the AI's diagnosis.** The model simulates the repair 8 times (it is stochastic, so every
    run differs) and reports a repair probability, the predicted time, how much shape and vascular
    tree come back, and an orange uncertainty map where the runs disagree. If most runs fail, the
@@ -26,9 +30,15 @@ tissue live: vessels first, then the tissue they feed.
    will reconnect, then the organ repairs live. Four phases — Sealing, Vessels, Refilling,
    Finishing — light up when the simulation actually reaches them, and the panel ends with the
    forecast next to the actual result.
+   - Regrowing cells take the colour of their cell type, and the phase bar lists each type with
+     the share rebuilt, numbered in the order the AI completes them.
+   - When a cut-off vessel links back to the tree, a light pulse runs from the junction along
+     everything that just got its blood back.
 6. **Look inside.**
-   - **Vessels**: an X-ray of the vascular tree. Vessels connected to the hilum carry blood pulses;
-     the vessels being regrown glow cyan; tissue without blood stays pale.
+   - **X-ray**: every cell type of the organ in its own colour (see the table below); vessels light
+     up where blood reaches them.
+   - **Cross-section**: a plane facing the camera that a slider moves through the organ, to watch
+     the wound fill from the inside.
    - **AI Brain**: the hidden channels the cells use to talk to each other, glowing where they change.
 7. **Check that the AI is doing the work.**
    - **Without AI**: the same lesion repaired by plain hole filling, side by side with the AI.
@@ -38,16 +48,29 @@ tissue live: vessels first, then the tissue they feed.
 
 ### One small network per organ
 Each organ is a 48³ grid of cells. Every cell holds 16 numbers: whether it is alive, four cell
-types (capsule, parenchyma, vessel, drainage) and 11 hidden channels the network is free to use.
+types and 11 hidden channels the network is free to use. The third type is always the vascular
+tree (blood comes in through it); the others depend on the organ:
+
+| Organ | Cell types the AI must rebuild |
+|---|---|
+| Liver | capsule, tissue, vessel tree, central vein |
+| Heart | epicardium, muscle wall, coronary arteries, coronary veins (the chambers are empty space it must keep) |
+| Kidney | outer cortex, inner medulla, vessels, ureter exit |
+| Lung | pleura, tissue, vessels, bronchial tree |
+| Bone (femur) | cortical shell, spongy bone, vessels, marrow |
+| Skin | epidermis, dermis, small vessels |
+| Stomach, spleen, pancreas, brain | outer layer, tissue, vessels, veins or duct |
+
 At every step each cell looks only at its 26 neighbours (3D Sobel filters) and a small MLP shared
 by all cells decides its update — a 3D **Neural Cellular Automaton** (Mordvintsev et al., 2020;
 Sudhakaran et al., 2021). Nothing in the code says how to repair: the rule is learned.
 
 ### Training
 `train/train.py` trains in PyTorch with a sample pool. Samples start from the healthy organ and
-are repeatedly damaged — 80% swipe incisions identical to the viewer's (`train/damage.py::wedge`
-matches `wedgeDist` in `web/src/shaders/fields.wgsl`), 20% spherical holes — so the network
-learns to keep the organ stable and to rebuild it. Checkpoints at 8%, 25%, 50%, 75% and 100% of
+are repeatedly damaged with the viewer's three lesions — 60% swipe incisions
+(`train/damage.py::wedge` matches `wedgeDist` in `web/src/shaders/fields.wgsl`), 25% punctures
+and 15% burns that keep spreading for 12 steps while the cells react — so the network learns to
+keep the organ stable and to rebuild it. Checkpoints at 8%, 25%, 50%, 75% and 100% of
 training feed *Watch the AI learn*.
 
 ### Blood supply
