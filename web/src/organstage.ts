@@ -13,6 +13,7 @@ import type { Metrics } from './metrics';
 import { loadCheckpoint, SimKernels, Simulation, TOOL_SPHERE, TOOL_WEDGE, type ToolOp, type Weights } from './sim';
 import { raycastTissue } from './tissue';
 import { establishBlood, measure, runWithBlood } from './blood';
+import { scoreOutcome, type OutcomeScore } from './healing';
 
 interface TrailPt { x: number; y: number; t: number }
 export interface CutInfo { kind: 'cut' | 'puncture' | 'burn'; depthMm: number; lengthMm: number }
@@ -98,7 +99,7 @@ export class OrganStage {
   section = { on: false, depth: 0.5 };
   private heal = 0;
   onRepair?: (s: RepairState) => void;
-  onRepairDone?: (o: RepairOutcome, forecast: DiagnosisResult) => void;
+  onRepairDone?: (o: RepairOutcome, forecast: DiagnosisResult, actual: OutcomeScore) => void;
   onPlan?: () => void;
   /** which volume(s) are shown: the live organ, AI vs hole filling side by side, or a training checkpoint */
   view: 'live' | 'compare' | 'learn' = 'live';
@@ -462,7 +463,7 @@ export class OrganStage {
     this.onCut?.({ kind: 'cut', depthMm: depth * mm, lengthMm: (s1 - s0) * mm });
   }
 
-  private get mmPerVoxel() { return ((this.scene.organ.meta.world?.half ?? 0.13) * 2 * 1000) / this.scene.n; }
+  get mmPerVoxel() { return ((this.scene.organ.meta.world?.half ?? 0.13) * 2 * 1000) / this.scene.n; }
 
   /** Where a click lands, pushed a little into the tissue (voxel space). */
   private clickPoint(x: number, y: number, depth: number): [number, number, number] | null {
@@ -627,7 +628,9 @@ export class OrganStage {
           this.onRepair?.(st);
           if (st.finished) {
             this.mode = 'done';
-            this.onRepairDone?.(tracker.outcome(), tracker.forecast);
+            // the live repair, scored exactly like the forecast's simulated repairs
+            const actual = scoreOutcome(tracker.forecast.healingCtx, sc.metrics, sc.latestSummary);
+            this.onRepairDone?.(tracker.outcome(), tracker.forecast, actual);
           }
         }
       });

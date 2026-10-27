@@ -1,22 +1,26 @@
 // AI diagnosis of a lesion: the trained NCA simulates the repair several times
-// (it is stochastic, so every rollout differs), and the outcomes give a repair
-// probability, a predicted repair time and an uncertainty map. Nothing is scripted:
+// (it is stochastic, so every rollout differs). Each simulated repair is scored on the
+// lesion itself (healing.ts); together they give a simulated healing potential, its
+// uncertainty, a predicted repair time and an uncertainty map. Nothing is scripted:
 // every number comes from the rollouts.
 import type { Metrics, MetricsEngine } from './metrics';
 import type { Simulation } from './sim';
 import { runWithBlood } from './blood';
+import { dilate, estimate, healingContext, scoreOutcome, shortfalls, type HealingContext, type HealingEstimate, type OutcomeScore } from './healing';
 
 export const ROLLOUTS = 8;
 export const ROLLOUT_STEPS = 120;
-const SHAPE_OK = 0.9;      // a rollout succeeds if it recovers > 90% of the shape...
-const VESSELS_OK = 0.9;    // ...with the vascular tree reconnected to the hilum
+/** Healing potential from which the repair is attempted live (a heuristic cut-off, not a probability). */
+export const REPAIR_THRESHOLD = 0.5;
 /** Live repair speed: slow while the wound closes so the phases can be followed, then faster. */
 export const liveStepsPerSec = (step: number) => (step < 24 ? 2.5 : 8);
 /** Seconds the live repair takes to reach `steps`. */
 export const liveSeconds = (steps: number) => Math.min(steps, 24) / 2.5 + Math.max(0, steps - 24) / 8;
 
 export interface RolloutResult {
+  /** healing potential of this simulated repair >= REPAIR_THRESHOLD */
   success: boolean;
+  score: OutcomeScore;
   final: Metrics;
   curve: { step: number; iou: number }[];
   healedAt: number;
@@ -24,14 +28,15 @@ export interface RolloutResult {
 
 export interface DiagnosisResult {
   repairable: boolean;
-  probability: number;      // share of rollouts that succeed
-  confidence: number;       // confidence in the verdict
+  /** simulated healing potential and its separate uncertainty (healing.ts) */
+  healing: HealingEstimate;
+  healingCtx: HealingContext;
   predictedSteps: number;
   shape: number;            // median shape recovered (IoU with the healthy organ)
   vessels: number;          // median share of the vascular tree linked to the hilum
   lesionShare: number;      // share of the tissue the lesion removed
   rollouts: RolloutResult[];
-  reasons: string[];        // why it is not repairable (measured, not scripted)
+  reasons: string[];        // why the repair falls short (measured, not scripted)
   /** rgba8 per voxel: r uncertainty, g critical area, b mean predicted tissue, a mean predicted vessel */
   aux: Uint8Array<ArrayBuffer>;
   /** voxels removed by the lesion, and the part of it open to the outside (the wound mouth) */
@@ -76,7 +81,7 @@ export class Diagnosis {
     const vessel = new Float32Array(nv);    // ...with a perfused vessel here
     let lesion: Uint8Array | null = null;
     let postCut: Uint32Array | null = null;
-    let lesionCount = 0;
+    let ctx: HealingContext | null = null;
 
     for (let k = 0; k < ROLLOUTS; k++) {
       // fresh copy of the lesioned organ (with its blood supply), with its own random stream
@@ -95,7 +100,7 @@ export class Diagnosis {
         if (k === 0 && s === 0) {
           postCut = sum;
           lesion = new Uint8Array(nv);
-          for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) { lesion[i] = 1; lesionCount++; }
+          for (let i = 0; i < nv; i++) if ((healthy[i] & 0xff) && !(sum[i] & 0xff)) lesion[i] = 1;
         }
       }, () => token === this.token);
       if (token !== this.token) return;
@@ -103,22 +108,24 @@ export class Diagnosis {
       const lastSum = end.sum!;
       // the rollout is healed once it reaches 98% of where it ends up
       const healedAt = curve.find((c) => c.iou >= final.iou * 0.98)?.step ?? ROLLOUT_STEPS;
-      const success = final.iou > SHAPE_OK && final.connectivity > VESSELS_OK;
       const perf = this.metrics.perfusion;
       for (let i = 0; i < nv; i++) {
         if (lastSum[i] & 0xff) alive[i]++;
         if (perf[4 * i]) vessel[i]++;
       }
-      this.progress.rollouts.push({ success, final, curve, healedAt });
+      // score this simulated repair on the lesion (the BFS runs again, so after reading the perfusion)
+      ctx ??= healingContext(this.metrics, healthy, postCut ?? healthy, this.hilum);
+      const score = scoreOutcome(ctx, this.metrics, lastSum);
+      const success = score.potential >= REPAIR_THRESHOLD;
+      this.progress.rollouts.push({ success, score, final, curve, healedAt });
       this.progress.done = k + 1;
       this.onProgress?.(this.progress);
     }
 
     // ------------------------------------------------------------ aggregate
     const R = this.progress.rollouts;
-    const ok = R.filter((r) => r.success).length;
-    const probability = ok / ROLLOUTS;
-    const repairable = ok > ROLLOUTS / 2;
+    const healing = estimate(ctx!, R.map((r) => r.score));
+    const repairable = healing.potential >= REPAIR_THRESHOLD;
     const med = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return (s[(s.length - 1) >> 1] + s[s.length >> 1]) / 2; };
     const shape = med(R.map((r) => r.final.iou));
     const vessels = med(R.map((r) => r.final.connectivity));
@@ -151,26 +158,9 @@ export class Diagnosis {
       aux[i * 4 + 3] = Math.round((vessel[i] / ROLLOUTS) * 255);
     }
 
-    // why it fails: measured facts only, the two most telling
-    const reasons: string[] = [];
-    if (!repairable) {
-      let hilumHit = false;
-      if (this.hilum && lesion) {
-        const [hx, hy, hz] = this.hilum;
-        let hit = 0;
-        for (let z = hz - 3; z <= hz + 3; z++) for (let y = hy - 3; y <= hy + 3; y++) for (let x = hx - 3; x <= hx + 3; x++) {
-          if (x >= 0 && y >= 0 && z >= 0 && x < n && y < n && z < n && lesion[x + y * n + z * n * n]) hit++;
-        }
-        hilumHit = hit > 6;
-      }
-      if (vessels <= VESSELS_OK) {
-        reasons.push(hilumHit
-          ? `Lesion reaches the hilum, where the vessels enter: only ${(vessels * 100).toFixed(0)}% of the vascular tree reconnects.`
-          : `Main vessels severed: only ${(vessels * 100).toFixed(0)}% of the vascular tree reconnects to the hilum.`);
-      }
-      if (shape <= SHAPE_OK) reasons.push(`Lesion too large: the tissue only recovers ${(shape * 100).toFixed(0)}% of its shape.`);
-      if (!reasons.length) reasons.push(`The simulated repairs disagree: only ${ok} of ${ROLLOUTS} recover both shape and vessels.`);
-    }
+    // why it falls short: measured facts only, the two most telling
+    const reasons = shortfalls(ctx!, healing);
+    if (!repairable && !reasons.length) reasons.push(`The simulated repairs disagree: healing potential ${healing.label}.`);
 
     // wound mouth: lesion voxels within 2 voxels of the outside of the healthy organ
     const outside = new Uint8Array(nv);
@@ -182,29 +172,14 @@ export class Diagnosis {
 
     this.result = {
       lesion: les, mouth, postCut: postCut ?? healthy,
-      repairable, probability, confidence: repairable ? probability : 1 - probability,
-      predictedSteps, shape, vessels, lesionShare: lesionCount / Math.max(1, this.metrics.targetCounts.slice(1).reduce((a, b) => a + b, 0)),
+      repairable, healing, healingCtx: ctx!,
+      predictedSteps, shape, vessels, lesionShare: ctx!.share,
       rollouts: R, reasons, aux,
     };
     this.progress.running = false;
     this.onProgress?.(this.progress);
     this.onResult?.(this.result);
   }
-}
-
-function dilate(m: Uint8Array, n: number, r: number): Uint8Array {
-  let cur = m;
-  for (let it = 0; it < r; it++) {
-    const out = new Uint8Array(cur);
-    for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      const i = x + y * n + z * n * n;
-      if (cur[i]) continue;
-      if ((x > 0 && cur[i - 1]) || (x < n - 1 && cur[i + 1]) || (y > 0 && cur[i - n]) || (y < n - 1 && cur[i + n]) ||
-        (z > 0 && cur[i - n * n]) || (z < n - 1 && cur[i + n * n])) out[i] = 1;
-    }
-    cur = out;
-  }
-  return cur;
 }
 
 /** Max over a (2r+1)^3 box, softened with distance: spreads a value onto the nearby wound walls. */

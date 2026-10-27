@@ -85,6 +85,44 @@ Shape is the 3D IoU with the healthy organ; vessels is the share of the vascular
 linked to the hilum; function is the share of parenchyma that receives enough nutrient.
 `eval/metrics.py` and `web/src/metrics.ts` compute the same quantities.
 
+### Healing potential (the diagnosis score)
+The diagnosis simulates the repair of the exact injury 8 times (120 steps each; the network is
+stochastic, so the runs differ) and scores each run **on the injury itself**, not on the whole
+organ (`web/src/healing.ts`). Whole-organ shape hides small injuries: a 6% cut leaves the organ
+at 94% shape before any repair, which the first version of this score counted as a success.
+
+| Term | What is measured, per simulated repair | Basis |
+|---|---|---|
+| **T** tissue reconstruction | removed voxels back with the *correct cell type* ÷ (removed voxels + tissue overgrowing the healthy shape around the wound) | measured |
+| **V** vascular recovery | share of the vessels beyond the wound that the injury cut off from the hilum and that have blood again | measured |
+| **F** blood supply restored | 1 − (share of the tree cut off) × (1 − V): a severed trunk feeding 20% of the tree costs 20%, a twig almost nothing | measured |
+| **I** collateral impairment | share of the *uninjured* functional tissue that ends up without enough nutrient (the simulation's own growth threshold) | measured |
+| **D** residual damage | voxels of the organ not back to their healthy type, plus overgrowth (shown, not scored) | measured |
+
+Per run, **H = T × F × (1 − I)**; the healing potential is the mean of H over the 8 runs. The
+three factors cover separate parts of the organ (the wound, the vessel tree beyond it, the
+uninjured tissue), so no damage is counted twice; an unrepaired wound scores 0, and rebuilding
+25% of a wound can never score above 25%.
+
+What the percentage means: *the share of the healthy state that the trained model restores for
+this injury, in its own simulated world.* The terms are measured; combining them as a product
+with equal weights is a heuristic choice. There are no real healing outcomes to calibrate
+against (the only "truth" is the same model run again), so it is **not a probability** and not a
+medical estimate. Injury severity (share of tissue, depth, blood supply cut) is shown next to it
+and acts on it only through the measured outcome: deep injuries cut more vessels, starve more
+tissue and take longer to fill.
+
+**Uncertainty is reported separately**, never folded into the score: *low* when the 8 runs agree
+within 5 points and the injury is within what the model saw in training; *moderate* up to a
+15-point spread or when the injury reaches the hilum; *high* beyond that, or when the injury is
+larger than any in training (> 25% of the organ). The score is rounded to 5 points, or shown as a
+10-point range when uncertainty is high: 8 runs of one model do not support finer numbers.
+*REPAIRABLE* (the live repair runs) means a potential of at least 50%, an arbitrary cut-off.
+
+`npm test` (in `web/`) checks the score on the real liver and kidney grids: no injury, a small
+superficial cut (repaired and not), a deep cut rebuilt 0–100%, a severed main vessel (reconnected
+and not), overgrowth, and disagreeing runs.
+
 ### In the browser
 Vite + TypeScript. Three.js draws the body; the organ volume, the cellular automaton, the
 diagnosis rollouts and the blood supply all run on the GPU with WebGPU compute shaders, and the
