@@ -8,7 +8,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
-export type OrganId = 'liver' | 'heart' | 'kidney' | 'lung' | 'stomach' | 'spleen' | 'pancreas' | 'brain';
+export type OrganId = 'liver' | 'heart' | 'kidney' | 'lung' | 'stomach' | 'spleen' | 'pancreas' | 'brain' | 'bone' | 'skin';
 
 export const ORGANS: Record<OrganId, { label: string; nodes: string[]; color: [number, number, number]; glow: [number, number, number] }> = {
   liver: { label: 'Liver', nodes: ['liver'], color: [0.40, 0.10, 0.08], glow: [1.0, 0.42, 0.25] },
@@ -19,7 +19,13 @@ export const ORGANS: Record<OrganId, { label: string; nodes: string[]; color: [n
   spleen: { label: 'Spleen', nodes: ['spleen'], color: [0.42, 0.10, 0.18], glow: [0.9, 0.3, 0.55] },
   pancreas: { label: 'Pancreas', nodes: ['pancreas'], color: [0.78, 0.60, 0.46], glow: [1.0, 0.8, 0.45] },
   brain: { label: 'Brain', nodes: ['brain'], color: [0.78, 0.58, 0.58], glow: [0.75, 0.6, 1.0] },
+  bone: { label: 'Femur (hip end)', nodes: ['femur_right', 'femur_left'], color: [0.86, 0.82, 0.72], glow: [1.0, 0.95, 0.8] },
+  // the skin mesh keeps its own material: it is picked where no organ is hit, and a small patch is repaired
+  skin: { label: 'Skin', nodes: [], color: [0.74, 0.58, 0.52], glow: [1.0, 0.8, 0.7] },
 };
+
+/** Size of the skin patch the camera zooms onto (m). */
+const SKIN_PATCH = 0.03;
 
 const skinVert = /* glsl */ `
   varying vec3 vN; varying vec3 vV; varying vec3 vW;
@@ -103,6 +109,9 @@ export class BodyView3D {
   private xray = 0;
   xrayTarget = 0;
   hovered: OrganId | null = null;
+  /** where the skin was last picked (world point and outward normal) */
+  skinHit: { point: [number, number, number]; normal: [number, number, number] } | null = null;
+  private skinMesh: THREE.Mesh | null = null;
   focused: OrganId | null = null;
   private focusAmt = 0; // 0 = whole body, 1 = organ isolated
   private tween: { from: [THREE.Vector3, THREE.Vector3]; to: [THREE.Vector3, THREE.Vector3]; start: number; dur: number } | null = null;
@@ -167,7 +176,7 @@ export class BodyView3D {
     const gltf = await new GLTFLoader().loadAsync(url);
     const root = gltf.scene;
     const byName = (n: string) => root.getObjectByName(n) as THREE.Mesh | undefined;
-    for (const name of ['skin']) { const m = byName(name); if (m) { m.material = this.skinMat; m.renderOrder = 10; } }
+    for (const name of ['skin']) { const m = byName(name); if (m) { m.material = this.skinMat; m.renderOrder = 10; this.skinMesh = m; } }
     const muscles = byName('muscles');
     if (muscles) { muscles.material = this.muscleMat; muscles.renderOrder = 5; }
     for (const [id, o] of Object.entries(ORGANS) as [OrganId, (typeof ORGANS)[OrganId]][]) {
@@ -221,27 +230,59 @@ export class BodyView3D {
     this.raycaster.setFromCamera(ndc, this.camera);
     const hits = this.raycaster.intersectObjects(this.organs.map((o) => o.mesh), false);
     this.pickedNode = (hits[0]?.object.userData.node as string) ?? null;
-    return (hits[0]?.object.userData.organ as OrganId) ?? null;
+    if (hits[0]) return hits[0].object.userData.organ as OrganId;
+    // no organ under the cursor: the skin itself (only while it is opaque)
+    if (!this.skinMesh || this.xrayTarget > 0.5) return null;
+    const s = this.raycaster.intersectObject(this.skinMesh, false)[0];
+    if (!s?.face) return null;
+    const nrm = s.face.normal.clone().transformDirection(this.skinMesh.matrixWorld);
+    if (nrm.dot(this.raycaster.ray.direction) > 0) nrm.negate();
+    this.skinHit = { point: [s.point.x, s.point.y, s.point.z], normal: [nrm.x, nrm.y, nrm.z] };
+    this.pickedNode = 'skin';
+    return 'skin';
+  }
+
+  /** Centre and radius the camera frames for an organ mesh; `topCrop` keeps only its upper part (m). */
+  private frameOf(o: OrganEntry, topCrop?: number) {
+    if (!topCrop) return { center: o.center.clone(), radius: o.radius };
+    const b = o.box.clone();
+    b.min.y = Math.max(b.min.y, b.max.y - topCrop);
+    const s = b.getBoundingSphere(new THREE.Sphere());
+    return { center: s.center, radius: s.radius };
   }
 
   /** Screen position of an organ's centre (for labels). */
   screenOf(id: OrganId): [number, number] {
+    if (id === 'skin') {
+      const p = new THREE.Vector3(...(this.skinHit?.point ?? [0, 0, 0])).project(this.camera);
+      return [(p.x * 0.5 + 0.5) * innerWidth, (0.5 - p.y * 0.5) * innerHeight];
+    }
     const es = this.entries(id);
     const p = es.reduce((a, e) => a.add(e.center), new THREE.Vector3()).multiplyScalar(1 / es.length).project(this.camera);
     return [(p.x * 0.5 + 0.5) * innerWidth, (0.5 - p.y * 0.5) * innerHeight];
   }
 
   /** Zoom onto one organ mesh (`node`, e.g. the kidney that was clicked) and fade everything else. */
-  focus(id: OrganId, node?: string) {
-    const es = this.entries(id);
-    const o = es.find((e) => e.node === node) ?? es[0];
-    this.focused = id;
-    this.focusedNode = o.node;
-    const dir = this.camera.position.clone().sub(this.controls.target).setY(0).normalize();
+  focus(id: OrganId, node?: string, topCrop?: number) {
+    let center: THREE.Vector3, radius: number;
+    let dir = this.camera.position.clone().sub(this.controls.target).setY(0).normalize();
     if (dir.lengthSq() < 0.5) dir.set(0, 0, 1);
     dir.lerp(new THREE.Vector3(0, 0, 1), 0.6).normalize().add(new THREE.Vector3(0, 0.12, 0)).normalize();
-    const dist = (o.radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov) / 2)) * 1.25;
-    this.startTween(o.center.clone().add(dir.multiplyScalar(dist)), o.center.clone(), 1.6);
+    if (id === 'skin' && this.skinHit) {
+      // look straight down onto the clicked patch of skin
+      center = new THREE.Vector3(...this.skinHit.point);
+      radius = SKIN_PATCH;
+      dir = new THREE.Vector3(...this.skinHit.normal);
+      this.focusedNode = 'skin';
+    } else {
+      const es = this.entries(id);
+      const o = es.find((e) => e.node === node) ?? es[0];
+      this.focusedNode = o.node;
+      ({ center, radius } = this.frameOf(o, topCrop));
+    }
+    this.focused = id;
+    const dist = (radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov) / 2)) * 1.25;
+    this.startTween(center.clone().add(dir.multiplyScalar(dist)), center.clone(), 1.6);
     this.controls.minDistance = dist * 0.45;
     this.controls.maxDistance = dist * 2.2;
   }
@@ -303,9 +344,11 @@ export class BodyView3D {
 
     const bodyFade = 1 - this.focusAmt;
     // X-ray (or isolating an organ) dissolves the skin into a ghost and removes the muscles
-    const xr = Math.max(this.xray, this.focusAmt);
+    // zooming onto the skin keeps it solid
+    const onSkin = this.focused === 'skin';
+    const xr = onSkin ? this.xray : Math.max(this.xray, this.focusAmt);
     this.skinMat.uniforms.uX.value = xr;
-    this.skinMat.uniforms.uFade.value = bodyFade;
+    this.skinMat.uniforms.uFade.value = onSkin ? 1 : bodyFade;
     this.muscleMat.uniforms.uFade.value = (1 - this.xray) * bodyFade;
     this.muscleMat.visible = this.muscleMat.uniforms.uFade.value > 0.01;
     this.muscleMat.depthWrite = this.muscleMat.uniforms.uFade.value > 0.95;
