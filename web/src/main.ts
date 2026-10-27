@@ -316,11 +316,11 @@ function prepareStage(id: OrganId, node: string) {
       s.onCut = (info) => { setCutInfo(info); showPhases(null); enableProofs(); };
       s.onPlan = () => analysis.plan();
       s.onRepair = (st) => showPhases(st);
-      s.onRepairDone = (o, f) => { analysis.actual(o, f); enableProofs(); };
+      s.onRepairDone = (o, f, a) => { analysis.actual(o, f, a); enableProofs(); };
       s.onCompare = (c) => showCompare(c);
       s.onLearn = (l) => showLearn(l);
       s.onDiagProgress = (p) => analysis.progress(p);
-      s.onDiagResult = (r) => { analysis.result(r); s.showDiagnosis(r); enableProofs(); };
+      s.onDiagResult = (r) => { analysis.result(r, s.mmPerVoxel); s.showDiagnosis(r); enableProofs(); };
     }
     if (import.meta.env.DEV) (window as unknown as { __stage: OrganStage | null }).__stage = s;
     return s;

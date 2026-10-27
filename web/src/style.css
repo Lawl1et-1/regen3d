@@ -112,6 +112,9 @@ button { font: inherit; color: inherit; }
 .verdict.bad { background: rgba(255, 77, 95, 0.12); border: 1px solid rgba(255, 77, 95, 0.45); color: var(--bad); }
 .reasons { margin: -4px 0 12px; padding: 0 0 0 16px; color: #ffb3bb; font-size: 12.5px; line-height: 1.45; }
 .reasons li { margin: 4px 0; }
+.ai-stats .unc.low { color: var(--ok); }
+.ai-stats .unc.moderate { color: #ffc46b; }
+.ai-stats .unc.high { color: var(--bad); }
 .ai-stats { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; margin: 0; }
 .ai-stats dt { color: var(--muted); }
 .ai-stats dd { margin: 0; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
