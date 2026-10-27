@@ -5,6 +5,11 @@
   "n": 48
  },
  {
+  "name": "brain",
+  "label": "Brain",
+  "n": 48
+ },
+ {
   "name": "heart",
   "label": "Heart",
   "n": 48
@@ -25,8 +30,18 @@
   "n": 48
  },
  {
+  "name": "pancreas",
+  "label": "Pancreas",
+  "n": 48
+ },
+ {
   "name": "skin",
   "label": "Skin",
+  "n": 48
+ },
+ {
+  "name": "spleen",
+  "label": "Spleen",
   "n": 48
  },
  {
