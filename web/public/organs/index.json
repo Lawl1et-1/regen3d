@@ -1,5 +1,10 @@
 [
  {
+  "name": "bone",
+  "label": "Bone",
+  "n": 48
+ },
+ {
   "name": "heart",
   "label": "Heart",
   "n": 48
