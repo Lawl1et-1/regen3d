@@ -4,7 +4,7 @@ import { AnalysisPanel } from './analysis';
 import { OrganStage } from './organstage';
 import { PHASES, type RepairState } from './repair';
 import type { Metrics } from './metrics';
-import type { LearnProgress } from './organstage';
+import type { CutInfo, LearnProgress, LesionTool } from './organstage';
 import { h } from './ui';
 
 const canvas = document.getElementById('three') as HTMLCanvasElement;
@@ -185,12 +185,28 @@ function select(id: OrganId) {
   label.classList.remove('show');
   top.classList.add('dim');
   const cuttable = CUTTABLE.includes(id);
-  hint.textContent = cuttable
-    ? 'Swipe across the organ to make a lesion · right-drag or two fingers to rotate · scroll to zoom'
-    : 'Drag to rotate the organ · scroll to zoom';
+  hint.textContent = 'Drag to rotate the organ · scroll to zoom';
   focusPanel.innerHTML = `<div class="fp-k">Selected organ</div><div class="fp-v">${ORGANS[id].label}</div>`;
   const actions = h('div', { class: 'fp-actions' });
   if (cuttable) {
+    // lesion tools: the swipe cut is the main one
+    const tools = h('div', { class: 'seg tools', role: 'group', 'aria-label': 'Lesion tool' });
+    const size = h('label', { class: 'tool-size' }, 'Size <input type="range" min="2" max="8" step="0.5" value="4" aria-label="Puncture size">');
+    const sizeInput = size.querySelector('input')!;
+    sizeInput.oninput = () => { if (stage) stage.punctureRadius = +sizeInput.value; };
+    const setTool = (t: LesionTool) => {
+      if (stage) stage.tool = t;
+      tools.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
+      size.classList.toggle('show', t === 'puncture');
+      hint.textContent = TOOL_HINT[t];
+    };
+    for (const [t, lbl] of [['swipe', 'Swipe'], ['puncture', 'Puncture'], ['burn', 'Burn']] as const) {
+      const b = h('button', { 'data-tool': t }, lbl);
+      b.onclick = () => setTool(t);
+      tools.appendChild(b);
+    }
+    actions.append(tools, size);
+    setTool('swipe');
     actions.appendChild(h('div', { class: 'fp-cut', id: 'cut-info' }, 'No lesion yet'));
     const reset = h('button', { class: 'pill' }, 'Reset organ');
     reset.onclick = () => { closeView(); stage?.reset(); setCutInfo(null); analysis.hide(); showPhases(null); enableProofs(); };
@@ -224,9 +240,19 @@ function select(id: OrganId) {
   focusPanel.classList.add('show');
 }
 
-function setCutInfo(info: { depthMm: number; lengthMm: number } | null) {
+const TOOL_HINT: Record<LesionTool, string> = {
+  swipe: 'Swipe across the organ to cut it · right-drag or two fingers to rotate · scroll to zoom',
+  puncture: 'Click the organ to puncture it · right-drag or two fingers to rotate · scroll to zoom',
+  burn: 'Press and hold on the organ: the burn spreads until you release · right-drag to rotate',
+};
+
+function setCutInfo(info: CutInfo | null) {
   const el = document.getElementById('cut-info');
-  if (el) el.textContent = info ? `Last cut · ${info.lengthMm.toFixed(0)} mm long · ${info.depthMm.toFixed(0)} mm deep` : 'No lesion yet';
+  if (!el) return;
+  if (!info) { el.textContent = 'No lesion yet'; return; }
+  el.textContent = info.kind === 'cut'
+    ? `Last cut · ${info.lengthMm.toFixed(0)} mm long · ${info.depthMm.toFixed(0)} mm deep`
+    : `Last ${info.kind} · ${info.lengthMm.toFixed(0)} mm wide`;
 }
 
 function unselect() {
@@ -282,9 +308,9 @@ let blade = false;
 canvas.addEventListener('pointerdown', (e) => {
   down = { x: e.clientX, y: e.clientY };
   if (stageOn && stage && !viewOpen && e.button === 0 && e.isPrimary) {
-    blade = true;
     canvas.setPointerCapture(e.pointerId);
-    stage.beginStroke(e.clientX, e.clientY);
+    if (stage.tool === 'swipe') { blade = true; stage.beginStroke(e.clientX, e.clientY); }
+    else if (stage.tool === 'burn') stage.beginBurn(e.clientX, e.clientY);
   }
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -296,6 +322,12 @@ canvas.addEventListener('pointermove', (e) => {
 });
 const up = (e: PointerEvent) => {
   if (blade) { blade = false; stage?.endStroke(); down = null; return; }
+  if (stage?.burning) { stage.endBurn(); down = null; return; }
+  if (stageOn && stage && !viewOpen && stage.tool === 'puncture' && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) {
+    stage.puncture(e.clientX, e.clientY);
+    down = null;
+    return;
+  }
   if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) { down = null; return; }
   down = null;
   const id = view.pick(e.clientX, e.clientY);

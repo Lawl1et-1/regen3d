@@ -10,12 +10,15 @@ import { Diagnosis, liveStepsPerSec, type DiagnosisResult } from './diagnosis';
 import { RepairTracker, type RepairOutcome, type RepairState } from './repair';
 import { asSummary, holeFillFrames } from './baseline';
 import type { Metrics } from './metrics';
-import { loadCheckpoint, SimKernels, Simulation, TOOL_WEDGE, type ToolOp, type Weights } from './sim';
+import { loadCheckpoint, SimKernels, Simulation, TOOL_SPHERE, TOOL_WEDGE, type ToolOp, type Weights } from './sim';
 import { raycastTissue } from './tissue';
 import { establishBlood, measure, runWithBlood } from './blood';
 
 interface TrailPt { x: number; y: number; t: number }
-export interface CutInfo { depthMm: number; lengthMm: number }
+export interface CutInfo { kind: 'cut' | 'puncture' | 'burn'; depthMm: number; lengthMm: number }
+export type LesionTool = 'swipe' | 'puncture' | 'burn';
+const BURN_SPEED = 1.6;     // voxels per second the burn spreads while the button is held
+const BURN_MAX = 9;
 export interface LearnRow { iteration: number; metrics: Metrics | null; step: number; done: boolean }
 export interface LearnProgress { rows: LearnRow[]; current: number; finished: boolean }
 const LEARN_STEPS = 100;
@@ -51,6 +54,10 @@ export class OrganStage {
   private trailDrawn = false;
   private lastVP = new Float32Array(16);
   onCut?: (info: CutInfo) => void;
+  /** which lesion the pointer makes; puncture radius in voxels */
+  tool: LesionTool = 'swipe';
+  punctureRadius = 4;
+  private burn: { center: [number, number, number]; r: number } | null = null;
   diagnosis: Diagnosis | null = null;
   /** class grid of the healthy organ (before any lesion), the reference for the diagnosis */
   private healthy: Uint32Array | null = null;
@@ -397,16 +404,65 @@ export class OrganStage {
       p3: [vDir[0], vDir[1], vDir[2], s0],
       p4: [uDir[0], uDir[1], uDir[2], s1],
     };
-    this.scene.sim.queueTool(op);
-    this.cutOps.push(op);
-    this.cutAge = 0;
+    this.lesion(op);
     this.flash = 0.35;
     this.diagPending = true;
     this.diag = [0, 0];
     this.stopRepair();
     const mm = this.scene.organ.meta.world ? (this.scene.organ.meta.world.half * 2 * 1000) / n : 1;
-    this.onCut?.({ depthMm: depth * mm, lengthMm: (s1 - s0) * mm });
+    this.onCut?.({ kind: 'cut', depthMm: depth * mm, lengthMm: (s1 - s0) * mm });
   }
+
+  private get mmPerVoxel() { return ((this.scene.organ.meta.world?.half ?? 0.13) * 2 * 1000) / this.scene.n; }
+
+  /** Where a click lands, pushed a little into the tissue (voxel space). */
+  private clickPoint(x: number, y: number, depth: number): [number, number, number] | null {
+    const h = this.hit(x, y);
+    if (!h) return null;
+    const r = this.ray(x, y);
+    const d = v3.norm(transformDir(invert(this.toWorld), r.d));
+    return v3.add(h.vox, v3.scale(d, depth)) as [number, number, number];
+  }
+
+  private lesion(op: ToolOp) {
+    this.scene.sim.queueTool(op);
+    this.cutOps.push(op);
+    this.cutAge = 0;
+    this.flash = 0.25;
+    this.diag = [0, 0];
+    this.stopRepair();
+  }
+
+  /** Puncture: a spherical hole of the chosen size where the user clicks. */
+  puncture(x: number, y: number) {
+    const r = this.punctureRadius;
+    const c = this.clickPoint(x, y, r * 0.6);
+    if (!c) return;
+    this.lesion({ kind: TOOL_SPHERE, p0: [c[0], c[1], c[2], r] });
+    this.diagPending = true;
+    this.onCut?.({ kind: 'puncture', depthMm: 2 * r * this.mmPerVoxel, lengthMm: 2 * r * this.mmPerVoxel });
+  }
+
+  /** Burn: damage spreads from the point while the button is held. */
+  beginBurn(x: number, y: number) {
+    const c = this.clickPoint(x, y, 0.5);
+    if (!c) return;
+    this.burn = { center: c, r: 1 };
+    this.diag = [0, 0];
+    this.stopRepair();
+  }
+
+  endBurn() {
+    const b = this.burn;
+    if (!b) return;
+    this.burn = null;
+    // the final burn is what the diagnosis analyses and what Watch the AI learn replays
+    this.cutOps.push({ kind: TOOL_SPHERE, p0: [b.center[0], b.center[1], b.center[2], b.r] });
+    this.diagPending = true;
+    this.onCut?.({ kind: 'burn', depthMm: 2 * b.r * this.mmPerVoxel, lengthMm: 2 * b.r * this.mmPerVoxel });
+  }
+
+  get burning() { return !!this.burn; }
 
   /** Tissue thickness (voxels) along `dir` starting at voxel point `e`. */
   private thickness(e: V3, dir: V3) {
@@ -437,6 +493,12 @@ export class OrganStage {
     this.flash = Math.max(0, this.flash - dt * 2.5);
 
     const sc = this.scene;
+    if (this.burn) {
+      this.burn.r = Math.min(BURN_MAX, this.burn.r + BURN_SPEED * dt);
+      const c = this.burn.center;
+      sc.sim.queueTool({ kind: TOOL_SPHERE, p0: [c[0], c[1], c[2], this.burn.r] });
+      this.cutAge = 0;
+    }
     const trained = sc.organ.meta.hidden > 0;
     // plan: the hologram shows the predicted repair for a moment, then the AI repairs live
     this.modeT += dt;
@@ -453,7 +515,7 @@ export class OrganStage {
     const simChanged = this.needPack || sc.sim.pendingTools > 0 || steps > 0;
     const vp = this.cam.viewProj;
     const camChanged = vp.some((v, i) => v !== this.lastVP[i]);
-    const animating = this.view !== 'live' || this.vessels || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
+    const animating = this.view !== 'live' || this.vessels || !!this.burn || this.flash > 0 || (this.cutAge >= 0 && this.cutAge < 1.5) || this.mode === 'plan' || this.mode === 'repair' || this.ghost > 0;
     if (simChanged || camChanged || animating || this.needRead) {
       const enc = this.device.createCommandEncoder();
       let read = null;
