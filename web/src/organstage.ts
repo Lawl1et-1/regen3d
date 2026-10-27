@@ -33,6 +33,8 @@ const TISSUE: Record<string, [number, number, number, number]> = {
   spleen: [0.34, 0.06, 0.12, 1],
   pancreas: [0.62, 0.40, 0.28, 1],
   brain: [0.66, 0.46, 0.45, 1],
+  bone: [0.80, 0.74, 0.62, 1],
+  skin: [0.72, 0.50, 0.44, 1],
 };
 
 /** Cell types (labels 1..4) per organ, used until an export carries its own `types`. */
@@ -142,7 +144,7 @@ export class OrganStage {
    * Show `organ` as the living volume, centred on `center` (the clicked mesh). `mirror`
    * flips it left-right: one kidney / lung model serves both sides of the body.
    */
-  async useOrgan(organ: string, center: V3, mirror: boolean) {
+  async useOrgan(organ: string, place: { center: V3; mirror: boolean; trainedCenter?: V3; normal?: V3 }) {
     let o = this.organs.get(organ);
     if (!o) {
       const scene = await Scene.load(this.device, organ);
@@ -167,8 +169,25 @@ export class OrganStage {
     this.tissue = TISSUE[organ] ?? TISSUE.liver;
     this.types = o.scene.organ.meta.types ?? (TYPES[organ] ?? TYPES.liver).map(([name, color]) => ({ name, color }));
     this.typeRgb = this.types.slice(0, 4).map((t) => linear(t.color));
-    const h = o.scene.organ.meta.world?.half ?? 0.13;
-    this.toWorld.set([mirror ? -h : h, 0, 0, 0, 0, h, 0, 0, 0, 0, h, 0, center[0], center[1], center[2], 1]);
+    const world = o.scene.organ.meta.world;
+    const h = world?.half ?? 0.13;
+    const { mirror, normal } = place;
+    let center = place.center;
+    // a model of part of a mesh (the hip end of the femur) sits off the mesh centre: same offset, mirrored on the other side
+    if (world && place.trainedCenter) {
+      const off = v3.sub(world.center, place.trainedCenter);
+      center = v3.add(center, [mirror ? -off[0] : off[0], off[1], off[2]]);
+    }
+    if (normal) {
+      // skin patch: its outer surface (+y) along the skin normal, epidermis level with the clicked point
+      const up = v3.norm(normal);
+      const t1 = v3.norm(v3.cross(up, Math.abs(up[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]));
+      const t2 = v3.cross(t1, up);
+      center = v3.sub(center, v3.scale(up, 0.23 * h));
+      this.toWorld.set([...v3.scale(t1, h), 0, ...v3.scale(up, h), 0, ...v3.scale(t2, h), 0, center[0], center[1], center[2], 1]);
+    } else {
+      this.toWorld.set([mirror ? -h : h, 0, 0, 0, 0, h, 0, 0, 0, 0, h, 0, center[0], center[1], center[2], 1]);
+    }
     this.reset();
   }
 

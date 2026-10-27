@@ -18,7 +18,7 @@ if (import.meta.env.DEV) (window as unknown as { __view: BodyView3D }).__view = 
  * Each organ's trained model and the mesh it was trained on. Kidneys and lungs come in
  * pairs: the other side shows the same model mirrored.
  */
-const MODELS: Record<OrganId, { model: string; mesh: string }> = {
+const MODELS: Record<OrganId, { model: string; mesh: string; topCrop?: number }> = {
   liver: { model: 'liver', mesh: 'liver' },
   heart: { model: 'heart', mesh: 'heart' },
   kidney: { model: 'kidney', mesh: 'kidney_left' },
@@ -27,6 +27,9 @@ const MODELS: Record<OrganId, { model: string; mesh: string }> = {
   spleen: { model: 'spleen', mesh: 'spleen' },
   pancreas: { model: 'pancreas', mesh: 'pancreas' },
   brain: { model: 'brain', mesh: 'brain' },
+  // the bone model covers the hip end of the femur (top 18 cm)
+  bone: { model: 'bone', mesh: 'femur_right', topCrop: 0.18 },
+  skin: { model: 'skin', mesh: 'skin' },
 };
 /** Organs whose AI is trained and exported (organs/index.json). */
 let CUTTABLE: OrganId[] = [];
@@ -193,7 +196,7 @@ function setXray(on: boolean) {
 
 function select(id: OrganId) {
   const node = view.pickedNode ?? MODELS[id].mesh;
-  view.focus(id, node);
+  view.focus(id, node, MODELS[id].topCrop);
   stageOrgan = null;
   stage?.setBrain(false);
   stage?.setVessels(false);
@@ -300,7 +303,10 @@ function prepareStage(id: OrganId, node: string) {
   const m = MODELS[id];
   const load = (s: OrganStage | null) => {
     if (!s) return;
-    void s.useOrgan(m.model, view.nodeCenter(node), node !== m.mesh).then(() => {
+    const place = id === 'skin' && view.skinHit
+      ? { center: view.skinHit.point, mirror: false, normal: view.skinHit.normal }
+      : { center: view.nodeCenter(node), mirror: node !== m.mesh, trainedCenter: view.nodeCenter(m.mesh) };
+    void s.useOrgan(m.model, place).then(() => {
       if (view.focused === id) stageOrgan = m.model;
     });
   };
