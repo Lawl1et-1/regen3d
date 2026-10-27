@@ -3,8 +3,9 @@
 set -e
 for organ in "$@"; do
   mkdir -p train/runs/$organ
+  rm -f train/runs/$organ/*.pt train/runs/$organ/*.png train/runs/$organ/log.csv
   echo "=== $organ: training $(date)"
-  .venv/Scripts/python train/train.py --organ $organ --iters 2500 --batch 4 --ckpt --snap-every 250 --damage-start 0 > train/runs/$organ/train.log 2>&1
+  .venv/Scripts/python train/train.py --organ $organ --iters ${ITERS:-1600} --batch 4 --ckpt --snap-every 250 --damage-start 0 > train/runs/$organ/train.log 2>&1
   echo "=== $organ: results $(date)"
   .venv/Scripts/python eval/brain_channels.py $organ | tail -1
   .venv/Scripts/python eval/liver_results.py $organ | tail -1

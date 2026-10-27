@@ -1,0 +1,57 @@
+{
+  "name": "bone",
+  "n": 48,
+  "channels": 16,
+  "seed": [
+    24,
+    27,
+    24
+  ],
+  "hilum": [
+    22,
+    28,
+    18
+  ],
+  "counts": {
+    "empty": 107378,
+    "capsule": 1614,
+    "parenchyma": 906,
+    "vessel": 406,
+    "drain": 288
+  },
+  "labels": [
+    "empty",
+    "capsule",
+    "parenchyma",
+    "vessel",
+    "drain"
+  ],
+  "world": {
+    "center": [
+      -0.1065468043088913,
+      -0.037034669890999794,
+      -0.023759734584018588
+    ],
+    "half": 0.09875360000878573
+  },
+  "mesh": "femur_right",
+  "source": "BodyParts3D right femur, hip end (CC BY 4.0) + procedural cortical/spongy/marrow layers and nutrient artery",
+  "types": [
+    {
+      "name": "cortical shell",
+      "color": "#f4f1e6"
+    },
+    {
+      "name": "spongy bone",
+      "color": "#d9b98a"
+    },
+    {
+      "name": "vessels",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "marrow",
+      "color": "#c4364f"
+    }
+  ]
+}

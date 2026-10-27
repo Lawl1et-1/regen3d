@@ -66,21 +66,22 @@ class NCA3D(nn.Module):
         return x * (pre & post).to(x.dtype)
 
     def forward(self, x: torch.Tensor, steps: int, use_checkpoint: bool = False,
-                chunk: int = 4) -> torch.Tensor:
-        if not use_checkpoint:
-            for _ in range(steps):
-                x = self.step(x)
-            return x
-
-        def run(x_, k):
-            for _ in range(k):
+                chunk: int = 4, post=None) -> torch.Tensor:
+        """Run `steps` updates. `post(x, step)` (optional) is applied after every step, e.g. a
+        lesion that keeps spreading while the cells react."""
+        def run(x_, start, k):
+            for i in range(k):
                 x_ = self.step(x_)
+                if post is not None:
+                    x_ = post(x_, start + i)
             return x_
 
+        if not use_checkpoint:
+            return run(x, 0, steps)
         done = 0
         while done < steps:
             k = min(chunk, steps - done)
-            x = checkpoint(run, x, k, use_reentrant=False)
+            x = checkpoint(run, x, done, k, use_reentrant=False)
             done += k
         return x
 

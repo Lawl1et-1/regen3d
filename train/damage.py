@@ -123,7 +123,42 @@ def wedge(x: torch.Tensor, depth_range=(0.15, 0.95), width_range=(1.5, 4.5)) -> 
     return x * (~m).float()
 
 
-DAMAGES = {"sphere": sphere, "plane": plane, "tunnel": tunnel, "wedge": wedge}
+def puncture(x: torch.Tensor, radius_range=(1.5, 8.0)) -> torch.Tensor:
+    """Puncture: a spherical hole of adjustable size around a random tissue voxel (the viewer's
+    puncture tool, radius in voxels)."""
+    n = x.shape[-1]
+    c = _random_alive_point(x, None)
+    r = radius_range[0] + torch.rand(1).item() * (radius_range[1] - radius_range[0])
+    keep = ((_coords(n, x.device) - c).norm(dim=-1) > r).float()
+    return x * keep
+
+
+def burn_plan(x: torch.Tensor, radius_range=(3.0, 9.0)):
+    """Burn: damage spreading slowly from a point. Returns (centre, final radius); the sphere
+    grows during the first BURN_STEPS steps of the rollout (see burn_hook)."""
+    c = _random_alive_point(x, None)
+    r = radius_range[0] + torch.rand(1).item() * (radius_range[1] - radius_range[0])
+    return c, r
+
+
+BURN_STEPS = 12
+
+
+def burn_hook(burns, n: int, device):
+    """Per-step hook applying spreading burns: burns = [(batch index, centre, final radius)]."""
+    dists = [(b, (_coords(n, device) - c).norm(dim=-1), r) for b, c, r in burns]
+
+    def hook(x: torch.Tensor, step: int) -> torch.Tensor:
+        if step >= BURN_STEPS:
+            return x
+        keep = torch.ones_like(x[:, :1])
+        for b, d, r in dists:
+            keep[b, 0] = (d > r * (step + 1) / BURN_STEPS).float()
+        return x * keep
+    return hook
+
+
+DAMAGES = {"sphere": sphere, "plane": plane, "tunnel": tunnel, "wedge": wedge, "puncture": puncture}
 
 
 def random_damage(x: torch.Tensor, kinds=("sphere", "plane", "tunnel"),

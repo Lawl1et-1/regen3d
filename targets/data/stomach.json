@@ -4,7 +4,7 @@
   "channels": 16,
   "seed": [
     29,
-    23,
+    24,
     25
   ],
   "hilum": [
@@ -13,11 +13,11 @@
     27
   ],
   "counts": {
-    "empty": 88770,
-    "capsule": 3405,
-    "parenchyma": 14886,
-    "vessel": 2501,
-    "drain": 1030
+    "empty": 88587,
+    "capsule": 3420,
+    "parenchyma": 15097,
+    "vessel": 2490,
+    "drain": 998
   },
   "labels": [
     "empty",
@@ -28,12 +28,30 @@
   ],
   "world": {
     "center": [
-      0.0388426473364234,
-      0.3164210766553879,
-      0.037675405852496624
+      0.0387201402336359,
+      0.3164026737213135,
+      0.037674485705792904
     ],
-    "half": 0.07406707732006908
+    "half": 0.07384094838052989
   },
   "mesh": "stomach",
-  "source": "BodyParts3D stomach (CC BY 4.0) + procedural gastric vessels"
+  "source": "BodyParts3D stomach (CC BY 4.0) + procedural gastric vessels",
+  "types": [
+    {
+      "name": "serosa",
+      "color": "#f2d27a"
+    },
+    {
+      "name": "wall",
+      "color": "#e07a6a"
+    },
+    {
+      "name": "vessels",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "veins",
+      "color": "#5b7cff"
+    }
+  ]
 }

@@ -4,20 +4,20 @@
   "channels": 16,
   "seed": [
     23,
-    32,
+    33,
     21
   ],
   "hilum": [
-    19,
+    28,
     16,
     27
   ],
   "counts": {
-    "empty": 88729,
-    "capsule": 4891,
-    "parenchyma": 12671,
-    "vessel": 3457,
-    "drain": 844
+    "empty": 88824,
+    "capsule": 9397,
+    "parenchyma": 8340,
+    "vessel": 3440,
+    "drain": 591
   },
   "labels": [
     "empty",
@@ -28,12 +28,30 @@
   ],
   "world": {
     "center": [
-      -0.0006933175027370453,
-      0.7652493715286255,
-      -0.015518557280302048
+      -0.0007453374564647675,
+      0.7652663290500641,
+      -0.01567394658923149
     ],
-    "half": 0.09359521381556989
+    "half": 0.09367751441895962
   },
   "mesh": "brain",
-  "source": "BodyParts3D cortex, white matter, cerebellum and brainstem (CC BY 4.0) + procedural vessels"
+  "source": "BodyParts3D cortex, white matter, cerebellum and brainstem (CC BY 4.0) + procedural vessels",
+  "types": [
+    {
+      "name": "cortex",
+      "color": "#d8a0c0"
+    },
+    {
+      "name": "white matter",
+      "color": "#f1e4ea"
+    },
+    {
+      "name": "vessels",
+      "color": "#ff2d48"
+    },
+    {
+      "name": "venous sinuses",
+      "color": "#5b7cff"
+    }
+  ]
 }

@@ -22,7 +22,7 @@ import torch  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "train"))
 
-from damage import DAMAGES, random_damage  # noqa: E402
+from damage import DAMAGES, burn_hook, burn_plan  # noqa: E402
 from nca import CHANNELS, NCA3D, make_seed  # noqa: E402
 from snapshots import render, save_png, strip  # noqa: E402
 
@@ -102,8 +102,8 @@ def main():
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--vram", type=float, default=0.6,
                     help="max share of GPU memory for training, so the browser/desktop keep enough")
-    ap.add_argument("--damage", nargs="+", default=["wedge:0.8", "sphere:0.2"],
-                    help="damage kinds with weights, e.g. wedge:0.8 sphere:0.2")
+    ap.add_argument("--damage", nargs="+", default=["wedge:0.6", "puncture:0.25", "burn:0.15"],
+                    help="damage kinds with weights; burn spreads during the first steps of the rollout")
     ap.add_argument("--init", choices=["seed", "target"], default="target",
                     help="start samples from a single seed cell (grow) or from the healthy organ (repair)")
     ap.add_argument("--checkpoints", type=float, nargs="+", default=[0.08, 0.25, 0.5, 0.75, 1.0],
@@ -156,16 +156,22 @@ def main():
             x = x[order]
             idx = idx[order.cpu()]
             x[:1] = seed
+            burns = []
             if it >= args.damage_start:
                 for j in range(1, 1 + args.n_damage):
                     k = args.batch - j
                     if x[k, 0].max() > 0.1:
-                        x[k], _ = random_damage(x[k], kinds, weights)
+                        kind = kinds[torch.multinomial(torch.tensor(weights), 1).item()]
+                        if kind == "burn":
+                            c, r = burn_plan(x[k])
+                            burns.append((k, c, r))
+                        else:
+                            x[k] = DAMAGES[kind](x[k])
         k_steps = int(torch.randint(steps[0], steps[1] + 1, (1,)))
         opt.zero_grad(set_to_none=True)
         try:
             with torch.autocast("cuda", dtype=torch.float16, enabled=args.amp):
-                y = model(x, k_steps, use_checkpoint=args.ckpt)
+                y = model(x, k_steps, use_checkpoint=args.ckpt, post=burn_hook(burns, n, dev) if burns else None)
             loss_s = per_sample_loss(y.float(), tgt, weight)
             overflow = (y - y.clamp(-3.0, 3.0)).abs().mean()
             loss = loss_s.mean() + overflow
